@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Env / secrets
+.env
+.env.local
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.vite/
+
+# Data / models (keep dirs via .gitkeep, ignore contents)
+data/*
+!data/.gitkeep
+*.wav
+*.mp3
+*.sqlite3
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Junk / scratch
+*.zip
+/1.json

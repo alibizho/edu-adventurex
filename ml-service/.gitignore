@@ -1,0 +1,7 @@
+models/
+saved_models/
+multilingual_fact_db/
+.hf_cache/
+*.parquet
+*.wav
+__pycache__/

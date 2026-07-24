@@ -1,0 +1,21 @@
+# GPU box (HyperAI RTX 5090). torch/torchaudio usually ship in the base image — match its CUDA
+# build rather than pip-installing a mismatched one.
+torch
+torchaudio
+faster-whisper
+transformers
+sentencepiece           # BGE-M3 / mDeBERTa tokenizers (required to load them at all)
+protobuf                # slow->fast tokenizer conversion (offset_mapping for Space A)
+accelerate
+bitsandbytes            # 4-bit Qwen judge (skip if JUDGE_BACKEND=api)
+FlagEmbedding           # OPTIONAL: only for the RAG ingest path (ingest.py). Space C is LLM-only now.
+chromadb                # OPTIONAL: only for the RAG ingest path (ingest.py). Space C is LLM-only now.
+huggingface_hub
+openai                  # only used when JUDGE_BACKEND=api
+fastapi
+uvicorn[standard]
+python-multipart        # file uploads
+pandas
+pyarrow                 # parquet read for ingest
+numpy
+requests
