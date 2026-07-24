@@ -6,15 +6,22 @@ venv/
 *.egg-info/
 .pytest_cache/
 
-# Env / secrets
+# Env / secrets  (.env.* also catches copies like .env.txt / .env.local)
 .env
-.env.local
+.env.*
+!.env.example
 
 # Node / frontend
 node_modules/
 dist/
 .next/
 .vite/
+.vite-pid
+*.tsbuildinfo
+
+# Dev server logs
+vite.*.log
+uvicorn.*.log
 
 # Data / models (keep dirs via .gitkeep, ignore contents)
 data/*
@@ -31,3 +38,4 @@ data/*
 # Junk / scratch
 *.zip
 /1.json
+qa-*.png

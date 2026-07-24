@@ -17,8 +17,13 @@ backend/     FastAPI service: the learn-by-teaching plan layer (scope → plan �
              learn-by-teaching guide: backend/LEARN_BY_TEACHING.md
 ml-service/  GPU confusion engine (Whisper ASR + Wav2Vec2/mDeBERTa/BGE + a judge LLM), deployed
              on Hyper AI. Setup: ml-service/README.md
-frontend/    React UI (placeholder — not started).
+frontend/    React + Vite UI — the pixel-art classroom. Drives the whole flow: upload material →
+             confirm the topic → build the plan → teach a class by voice → read the result.
+             Setup + route map: frontend/README.md
 ```
+
+Three services, three processes. The frontend (:5173) talks only to the backend (:8000); only the
+backend talks to the ml-service (:8100), and it degrades gracefully when that box is down.
 
 ## Run
 
@@ -34,9 +39,24 @@ uvicorn app.main:app --port 8000
 ```
 Interactive docs: http://localhost:8000/docs. Full endpoint reference: [backend/API.md](backend/API.md).
 
+PDF/image material extraction needs Tesseract on the box (`brew install tesseract`; the Docker
+image installs it). Without it, text and Markdown uploads still work.
+
+**Frontend** (local, needs the backend running):
+```bash
+cd frontend
+npm install
+npm run dev                   # http://127.0.0.1:5173
+```
+`http://127.0.0.1:5173` and `http://localhost:5173` are in the backend's `CORS_ORIGINS` default;
+serving the UI from anywhere else means adding that origin in `backend/.env`. Details:
+[frontend/README.md](frontend/README.md).
+
 **ml-service** (Hyper AI GPU box): see [ml-service/README.md](ml-service/README.md). It must be
-running for the audio confusion endpoints (`/confusion/analyze`, `/questions/from_chunk`); point the
-backend at it with `ML_SERVICE_URL` in `backend/.env`.
+running for the audio confusion endpoints (`/confusion/analyze`, `/questions/from_chunk`,
+`/plan/{id}/class/{cid}/teach/audio-turn`); point the backend at it with `ML_SERVICE_URL` in
+`backend/.env`. When it's unreachable the audio turn returns `degraded: true` and the UI falls back
+to text teaching rather than inventing a transcript.
 
 **Docker** (Postgres + backend, durable storage): put your LLM keys + the Hyper AI `ML_SERVICE_URL`
 in `backend/.env`, then:
