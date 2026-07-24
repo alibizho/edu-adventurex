@@ -1,5 +1,5 @@
 """Deterministic confusion-engine output for the targeted-question demo — stands in for the
-future ML (Divay.MD §6). A learner explaining a web request flow: most chunks are clear, a few
+future ML. A learner explaining a web request flow: most chunks are clear, a few
 are low-confidence with typed anomalies. Keeps the harness output stable.
 """
 from app.schemas import Anomaly, ChunkAnalysis

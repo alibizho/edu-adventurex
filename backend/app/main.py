@@ -1,10 +1,23 @@
 """FastAPI entrypoint.  Run:  uvicorn app.main:app --reload"""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import router
+from .store import store
 
-app = FastAPI(title="Teachable Student", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # init(): the DB store creates tables (so a fresh Postgres is usable with no migration step);
+    # the memory store is a no-op. dispose() drops the engine connection pool on shutdown.
+    await store.init()
+    yield
+    await store.dispose()
+
+
+app = FastAPI(title="Teachable Student", version="0.1.0", lifespan=lifespan)
 
 # Open CORS for the hackathon so the frontend (whatever port) can hit the API.
 app.add_middleware(

@@ -1,4 +1,4 @@
-"""Targeted-question agent (newTR.md §6.3). Given the lowest-confidence chunks from the confusion
+"""Targeted-question agent. Given the lowest-confidence chunks from the confusion
 engine plus the Q&A history, it writes specialized questions probing exactly those weak spots, and
 never repeats a question already asked. One LLM call per round — kept as a plain async function so
 it can become a LangGraph node later if the loop grows an adaptive branch.

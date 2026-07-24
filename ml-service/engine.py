@@ -1,4 +1,4 @@
-"""ConfusionEngine — the tri-modal detector (Divay.MD), refactored from audi.ipynb for hosting.
+"""ConfusionEngine — the tri-modal detector, refactored from audi.ipynb for hosting.
 
 Changes vs the notebook:
   - one class, models loaded once (not at import); no module-global rolling context — history is
@@ -288,7 +288,7 @@ class ConfusionEngine:
         """LLM-only fact check — no retrieval DB. The judge decides from its own knowledge whether
         the claim is factually correct, and names the wrong span + correction. Broader coverage
         than a slim vector DB for common curriculum facts; swap back to RAG for syllabus-grounded
-        or citable checking (see TECHNICAL_REPORT §3.5)."""
+        or citable checking."""
         out = self._judge(
             f"CLAIM: {transcript}\n"
             "Is this claim factually correct for a school-level explanation? Reply on ONE line,\n"

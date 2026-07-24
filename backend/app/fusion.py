@@ -1,4 +1,4 @@
-"""Fusion of the two instruments (TECHNICAL_REPORT §6) — the best-of-both-worlds layer.
+"""Fusion of the two instruments — the best-of-both-worlds layer.
 
 Cross each segment's DISTURBANCE (1 - confidence, from the ml confusion engine: how unsure the
 kid *sounded* + what was factually wrong) with its TRANSFER DELTA (from the ensemble measurement:

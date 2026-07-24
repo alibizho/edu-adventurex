@@ -1,5 +1,5 @@
 """Shared data model. Everything downstream keys off `Segment.id` — do not change that
-contract without a heads-up (see README). Mirrors TECHNICAL_REPORT.md §7."""
+contract without a heads-up (see README)."""
 from enum import Enum
 from typing import Optional
 
@@ -70,7 +70,7 @@ class TeachTurnResponse(BaseModel):
     new_segment: Segment
 
 
-# ---- confusion engine output (the contract the future ML fills; see Divay.MD §6) ----
+# ---- confusion engine output (the contract the ml-service fills) ----
 
 class Anomaly(BaseModel):
     type: str                       # e.g. "factual_error", "recall_failure", "logic_error", "hedging"

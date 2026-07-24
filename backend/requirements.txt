@@ -6,3 +6,5 @@ openai
 python-dotenv
 httpx                   # async client -> ml-service /analyze
 python-multipart        # audio uploads to /confusion/analyze
+sqlalchemy>=2.0         # ORM + async engine for the Postgres context store
+asyncpg                 # async Postgres driver for SQLAlchemy

@@ -1,9 +1,9 @@
-"""Confusion engine — the Divay.MD / Instrument-C model (report newTR.md §6). Owned by the ML
+"""Confusion engine — the Instrument-C model. Owned by the ML
 workstream; NOT built yet. `analyze` is the contract the future model fills.
 
 Until the real model lands, `analyze` is a light heuristic MOCK so the targeted-question backend
 runs end-to-end: chunks with hedging / uncertainty markers get a low confidence score and a
-plausible anomaly; clear chunks score high. Real impl (Divay.MD §3-4): frozen encoders + retrieval
+plausible anomaly; clear chunks score high. Real impl: frozen encoders + retrieval
 + NLI -> per-chunk confidence + typed anomalies.
 
 Contract: confidence in [0,1], HIGH = the speaker sounded clear/confident on the chunk, LOW =

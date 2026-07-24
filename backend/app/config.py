@@ -48,5 +48,10 @@ class Settings(BaseSettings):
     ml_service_url: str = "http://localhost:8100"
     ml_service_timeout: float = 60.0            # first call includes cold Whisper on the GPU box
 
+    # --- Context store: "memory" (dev default, lost on restart, no extra deps) or "db" (Postgres,
+    #     durable across restarts). When store_backend == "db", database_url must be set. ---
+    store_backend: str = "memory"
+    database_url: str = ""
+
 
 settings = Settings()

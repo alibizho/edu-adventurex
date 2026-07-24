@@ -1,5 +1,5 @@
 """The trainable 'brain' — projection heads + cross-attention that align audio and text into a
-shared space (Divay.MD §4). Frozen encoders feed this; only this is trained."""
+shared space. Frozen encoders feed this; only this is trained."""
 import torch.nn as nn
 
 

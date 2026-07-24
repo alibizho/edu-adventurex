@@ -1,45 +1,61 @@
 # Teachable Student
 
-**A kid teaches an AI that knows nothing. We measure how much actually got through.**
+A kid teaches an AI that knows nothing — and we **measure** how much actually got through, by
+experiment instead of a rubric. The AI plays a confused student (it only asks, restates, or admits
+confusion); the kid is the teacher. After the lesson the AI sits a hidden test, and we compare
+students who heard the lesson against a control that didn't. That gap is the real measure of
+understanding. Cross it with how unsure the kid *sounded* while teaching, and a confident-but-wrong
+explanation becomes a visible **blind spot** — the thing no rubric can catch.
 
-Most AI tutors answer questions. A fluent answer *feels* like learning while nothing is learned. We flip it: the AI is the confused student, the kid is the teacher, and we measure real understanding two ways at once.
+## What's here
 
-## The idea
-
-1. **Kid teaches out loud.** The AI plays a student — it only asks, restates, or admits confusion. It never explains or answers its own questions.
-2. **We test what transmitted.** The AI sits a hidden test. Two arms take it: one that heard the kid, one that heard nothing. The score is the **gap** between them. A negative gap means the kid taught something confidently wrong.
-3. **We listen to *how* they said it.** A speech model flags uncertainty in real time — filled pauses, self-corrections, hedging, shaky pitch.
-4. **We cross the two.** Fluent but wrong = a blind spot no rubric can catch. That's the whole product.
-
-Full detail: [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md).
-
-## Stack
-
-- **Backend:** FastAPI (async), Postgres
-- **Models:** small fast LLM for the student ensemble, larger LLM for question generation
-- **Speech:** openSMILE + Whisper, LightGBM disturbance model
-- **Frontend:** React + Tailwind, canvas sprite
-
-## Team (4, moving fast)
-
-| Owner | Area |
-|---|---|
-| ML–transfer | question generation, the cold-student filter, persona seeds |
-| ML–speech | disturbance model, per-speaker calibration, eval |
-| Backend | parallel scoring, transcript + gap store, delta math, fusion |
-| UI | voice loop, sprite, results screen (this **is** the demo) |
-
-## Contributing
-
-- **Branch off `main`**, name it `area/thing` (e.g. `speech/calibration`). Small PRs, merge fast.
-- **Keep the shared contract stable.** Everything keys off transcript **segment IDs** — don't change that schema without a heads-up in the group chat.
-- **Two go/no-go experiments come first** (see report §11): (1) prove the delta separates a good vs bad transcript; (2) prove the speech model scores the bad one higher. 
-
-## Run (WIP)
-
-```bash
-# backend
-uvicorn app.main:app --reload
-# frontend
-npm install && npm run dev
 ```
+backend/     FastAPI service: teaching loop, transfer-delta measurement, fusion, and real-time
+             per-chunk questions. Calls the ml-service for speech-confusion analysis.
+             HTTP contract + frontend guide: backend/API.md
+ml-service/  GPU confusion engine (Whisper ASR + Wav2Vec2/mDeBERTa/BGE + a judge LLM), deployed
+             on Hyper AI. Setup: ml-service/README.md
+frontend/    React UI (placeholder — not started).
+```
+
+## Run
+
+**Backend** (local):
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # fill in LLM keys + ML_SERVICE_URL
+uvicorn app.main:app --port 8000
+# State is in-memory by default (lost on restart). For durable Postgres storage, set
+# STORE_BACKEND=db + DATABASE_URL in .env — or just use Docker (below).
+```
+Interactive docs: http://localhost:8000/docs. Full endpoint reference: [backend/API.md](backend/API.md).
+
+**ml-service** (Hyper AI GPU box): see [ml-service/README.md](ml-service/README.md). It must be
+running for the audio confusion endpoints (`/confusion/analyze`, `/questions/from_chunk`); point the
+backend at it with `ML_SERVICE_URL` in `backend/.env`.
+
+**Docker** (Postgres + backend, durable storage): put your LLM keys + the Hyper AI `ML_SERVICE_URL`
+in `backend/.env`, then:
+```bash
+docker compose up --build      # http://localhost:8000/docs
+```
+Runs `STORE_BACKEND=db`, so session context survives restarts. Inspect the DB with
+`docker compose exec db psql -U ts -d teachable`.
+
+## How it fits together
+
+- **Real-time spoken class (primary flow):** the kid states a topic and teaches out loud. The
+  frontend sends each paused speech chunk to `POST /questions/from_chunk`; the ml-service analyzes
+  it and the backend generates a question only when the chunk sounded confused.
+- **Measurement flow:** `POST /teach/turn` builds a transcript → `POST /measure` runs the
+  taught-vs-cold ensemble (transfer delta) → `GET /fusion/{id}` crosses disturbance × delta into
+  per-segment quadrants (`blind_spot` / `aware_gap` / `productive_struggle` / `mastery`).
+
+## Status
+
+Running end-to-end against a live ml-service on Hyper AI and DeepSeek LLMs. The ml-service's
+confusion signals are still being tuned (its anomaly judges are noisy on short utterances), so the
+real-time question gate currently fires on low confidence + a lexical hesitation backstop rather
+than the raw anomaly flags — see [backend/API.md](backend/API.md) "Practical notes".

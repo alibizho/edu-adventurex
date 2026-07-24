@@ -1,12 +1,11 @@
 # ml-service — Confusion Engine (Instrument B/C)
 
-The GPU service. Refactor of the ML teammate's `audi.ipynb` (the tri-modal confusion detector,
-Divay.MD) into a deployable FastAPI app sized to fit **HyperAI RTX 5090 (32 GB VRAM / 20 GB
+The GPU service. Refactor of the ML teammate's `audi.ipynb` (the tri-modal confusion detector) into a deployable FastAPI app sized to fit **HyperAI RTX 5090 (32 GB VRAM / 20 GB
 storage)**. The main backend calls it per recorded utterance and gets back a `ChunkAnalysis`.
 
 ## What it does
 
-Per spoken utterance, three "spaces" (Divay.MD §4):
+Per spoken utterance, three "spaces":
 - **A · audio ↔ text** — hesitation / recall failure (Wav2Vec2 + mDeBERTa → trained alignment brain)
 - **B · text ↔ text** — self-contradiction vs earlier speech (judge LLM)
 - **C · text ↔ knowledge** — factual error vs a Wikipedia vector DB (BGE-M3 + Chroma, judge LLM)
@@ -44,7 +43,7 @@ export HF_ENDPOINT=https://hf-mirror.com          # REQUIRED on HyperAI (CN); se
 hf download facebook/wav2vec2-large-xlsr-53 --local-dir ./models/wav2vec2_xlsr
 hf download microsoft/mdeberta-v3-base      --local-dir ./models/mdeberta_v3
 hf download BAAI/bge-m3                      --local-dir ./models/bge_m3
-# (python download_models.py does the same, but the CLI resumes better on flaky links)
+# (or: bash fetch_models.sh — resumable ModelScope downloads, better on flaky links)
 #    put the trained brain at ./saved_models/alignment_engine_STAGE1.pth  (from the teammate)
 
 # 3. (Space C only) build the slim ground-truth DB once
@@ -88,6 +87,7 @@ schemas.py          ChunkAnalysis / Anomaly (mirrors the backend contract)
 alignment.py        AlignmentEngine (the trainable brain)
 engine.py           ConfusionEngine — refactored analyze(): stateless, fp16, pluggable judge
 server.py           FastAPI: POST /analyze, GET /health
-download_models.py  one-copy model fetch
+fetch_models.sh     resumable ModelScope model fetch (run once per fresh volume)
+start.sh            idempotent startup: restore deps/env, then serve on :8100
 ingest.py           slim Space-C vector DB builder
 ```

@@ -25,7 +25,7 @@ from ..schemas import (
     TeachTurnRequest,
     TeachTurnResponse,
 )
-from ..store import memory
+from ..store import store
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ async def health() -> dict:
 async def teach_turn(req: TeachTurnRequest) -> TeachTurnResponse:
     """One turn of the teaching loop: kid speaks, student replies in character."""
     resp = await student_turn(req.transcript, req.latest_utterance)
-    memory.append_segment(req.session_id, resp.new_segment)
+    await store.append_segment(req.session_id, resp.new_segment)
     return resp
 
 
@@ -52,13 +52,12 @@ async def measure(session_id: str) -> RunResult:
     the question's ground-truth key. No source is attached to stored sessions yet, so keys fall
     back to the generator's own topic knowledge.
     """
-    transcript: list[Segment] = memory.get_transcript(session_id)
+    transcript: list[Segment] = await store.get_transcript(session_id)
     questions = await generate_questions(transcript)
 
     survivors, survival_rate = await filter_questions(questions)
     result, scores = await score_ensemble(transcript, survivors, survival_rate, session_id)
-    memory.runs[session_id] = result
-    memory.scores[session_id] = scores
+    await store.set_run(session_id, result, scores)
     return result
 
 
@@ -87,14 +86,14 @@ async def confusion_analyze(
     except json.JSONDecodeError:
         hist = []
     if not hist:
-        hist = [s.text for s in memory.get_transcript(session_id)]
+        hist = [s.text for s in await store.get_transcript(session_id)]
 
     audio_bytes = await audio.read()
     analysis = await client.analyze_audio(
         audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
         history=hist, enable_space_c=enable_space_c,
     )
-    memory.append_analysis(session_id, analysis)
+    await store.append_analysis(session_id, analysis)
     return analysis
 
 
@@ -123,8 +122,8 @@ async def questions_from_chunk(
     except json.JSONDecodeError:
         hist = []
     if not hist:
-        hist = [a.text for a in memory.get_analyses(session_id)] or [
-            s.text for s in memory.get_transcript(session_id)
+        hist = [a.text for a in await store.get_analyses(session_id)] or [
+            s.text for s in await store.get_transcript(session_id)
         ]
 
     audio_bytes = await audio.read()
@@ -132,11 +131,11 @@ async def questions_from_chunk(
         audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
         history=hist, enable_space_c=enable_space_c,
     )
-    memory.append_analysis(session_id, analysis)
+    await store.append_analysis(session_id, analysis)
 
     if topic:
-        memory.set_topic(session_id, topic)
-    topic = topic or memory.get_topic(session_id)
+        await store.set_topic(session_id, topic)
+    topic = topic or await store.get_topic(session_id)
 
     confused = (
         (settings.question_gate_on_anomalies and bool(analysis.anomalies))
@@ -147,10 +146,10 @@ async def questions_from_chunk(
         return ChunkQuestionResponse(asked=False, analysis=analysis, question=None)
 
     questions = await generate_targeted_questions(
-        [analysis], memory.get_history(session_id),
-        start_id=memory.next_question_id(session_id), topic=topic or None,
+        [analysis], await store.get_history(session_id),
+        start_id=await store.next_question_id(session_id), topic=topic or None,
     )
-    memory.record_questions(session_id, questions)
+    await store.record_questions(session_id, questions)
     return ChunkQuestionResponse(
         asked=True, analysis=analysis,
         question=questions[0] if questions else None,
@@ -160,7 +159,7 @@ async def questions_from_chunk(
 @router.post("/confusion/ingest")
 async def confusion_ingest(req: IngestRequest) -> dict:
     """Store per-chunk analyses from the confusion engine (an external ML can also post here)."""
-    memory.set_analyses(req.session_id, req.chunks)
+    await store.set_analyses(req.session_id, req.chunks)
     return {"session_id": req.session_id, "n_chunks": len(req.chunks)}
 
 
@@ -168,11 +167,11 @@ async def confusion_ingest(req: IngestRequest) -> dict:
 async def confusion_mock(session_id: str) -> dict:
     """Demo path while the ML is absent: run the heuristic mock over the stored transcript's
     segment texts and store the resulting analyses."""
-    transcript = memory.get_transcript(session_id)
+    transcript = await store.get_transcript(session_id)
     if not transcript:
         raise HTTPException(404, f"no transcript for session {session_id!r}")
     analyses = engine.analyze([s.text for s in transcript])
-    memory.set_analyses(session_id, analyses)
+    await store.set_analyses(session_id, analyses)
     return {"session_id": session_id, "n_chunks": len(analyses)}
 
 
@@ -183,9 +182,9 @@ async def fusion_view(session_id: str) -> FusionResult:
     """Cross the stored confusion analyses (disturbance) with the transfer-delta run (competence)
     into the per-segment quadrant map + calibration. Run /confusion/analyze (or /mock) and /measure
     first; either alone still returns partial results (segments it can't cross are 'unknown')."""
-    analyses = memory.get_analyses(session_id)
-    run = memory.runs.get(session_id)
-    scores = memory.scores.get(session_id, [])
+    analyses = await store.get_analyses(session_id)
+    run = await store.get_run(session_id)
+    scores = await store.get_scores(session_id)
     if not analyses and run is None:
         raise HTTPException(404, f"no analyses or measurement run for session {session_id!r}")
     per_question = run.per_question if run else []
@@ -196,25 +195,25 @@ async def fusion_view(session_id: str) -> FusionResult:
 async def questions_next(req: NextQuestionsRequest) -> list[TargetedQuestion]:
     """Pick the lowest-confidence uncovered chunks and generate specialized, non-repeating
     questions for them, keyed off the session's Q&A memory."""
-    analyses = memory.get_analyses(req.session_id)
+    analyses = await store.get_analyses(req.session_id)
     if not analyses:
         raise HTTPException(404, f"no analyses for session {req.session_id!r}; ingest or mock first")
 
     chunks = engine.select_low_confidence(
-        analyses, k=req.n, exclude_ids=memory.covered_chunk_ids(req.session_id)
+        analyses, k=req.n, exclude_ids=await store.covered_chunk_ids(req.session_id)
     )
-    history = memory.get_history(req.session_id)
+    history = await store.get_history(req.session_id)
     questions = await generate_targeted_questions(
-        chunks, history, start_id=memory.next_question_id(req.session_id)
+        chunks, history, start_id=await store.next_question_id(req.session_id)
     )
-    memory.record_questions(req.session_id, questions)
+    await store.record_questions(req.session_id, questions)
     return questions
 
 
 @router.post("/questions/answer")
 async def questions_answer(req: AnswerRequest) -> dict:
     """Record the user's answer so the agent won't re-ask it."""
-    ok = memory.record_answer(req.session_id, req.question_id, req.answer)
+    ok = await store.record_answer(req.session_id, req.question_id, req.answer)
     if not ok:
         raise HTTPException(404, f"unknown question_id {req.question_id} for session {req.session_id!r}")
     return {"session_id": req.session_id, "question_id": req.question_id, "recorded": True}
@@ -222,4 +221,4 @@ async def questions_answer(req: AnswerRequest) -> dict:
 
 @router.get("/questions/history/{session_id}", response_model=list[QAEntry])
 async def questions_history(session_id: str) -> list[QAEntry]:
-    return memory.get_history(session_id)
+    return await store.get_history(session_id)

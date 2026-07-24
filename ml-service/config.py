@@ -31,7 +31,7 @@ WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "deepdml/faster-whisper-large-v3
 WHISPER_COMPUTE = os.environ.get("WHISPER_COMPUTE", "float16" if DEVICE == "cuda" else "int8")
 
 # --- encoders (Space A / B / C). Loaded from *_DIR if present (offline, single copy), else pulled
-#     from the *_REPO hub id on the fly — so ingest/serve work even before download_models.py runs. ---
+#     from the *_REPO hub id on the fly — so ingest/serve work even before models are fetched. ---
 WAV2VEC_DIR = os.path.join(MODELS_DIR, "wav2vec2_xlsr")
 DEBERTA_DIR = os.path.join(MODELS_DIR, "mdeberta_v3")
 BGE_DIR = os.path.join(MODELS_DIR, "bge_m3")
