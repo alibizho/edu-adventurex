@@ -5,7 +5,17 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from ..schemas import ChunkAnalysis, QAEntry, RunResult, Score, Segment, TargetedQuestion
+from ..schemas import (
+    ChunkAnalysis,
+    ClassUnit,
+    GrowthPath,
+    PathMemory,
+    QAEntry,
+    RunResult,
+    Score,
+    Segment,
+    TargetedQuestion,
+)
 
 
 class Store(Protocol):
@@ -37,3 +47,12 @@ class Store(Protocol):
     # session topic
     async def set_topic(self, session_id: str, topic: str) -> None: ...
     async def get_topic(self, session_id: str) -> str: ...
+
+    # learning plan (growth path) — keyed by path_id
+    async def save_path(self, path: GrowthPath) -> None: ...
+    async def get_path(self, path_id: str) -> GrowthPath | None: ...
+    async def save_class(self, path_id: str, cls: ClassUnit) -> None: ...
+
+    # cross-class memory — keyed by path_id
+    async def get_memory(self, path_id: str) -> PathMemory: ...
+    async def update_memory(self, path_id: str, memory: PathMemory) -> None: ...

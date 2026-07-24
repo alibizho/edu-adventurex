@@ -6,7 +6,6 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
-from ..config import settings
 from ..confusion import client, engine
 from ..fusion import fuse
 from ..pipeline.filter import filter_questions
@@ -137,12 +136,7 @@ async def questions_from_chunk(
         await store.set_topic(session_id, topic)
     topic = topic or await store.get_topic(session_id)
 
-    confused = (
-        (settings.question_gate_on_anomalies and bool(analysis.anomalies))
-        or analysis.confidence < settings.question_confidence_threshold
-        or engine.has_confusion_markers(analysis.text)
-    )
-    if not confused:
+    if not engine.is_confused(analysis):
         return ChunkQuestionResponse(asked=False, analysis=analysis, question=None)
 
     questions = await generate_targeted_questions(

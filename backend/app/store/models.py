@@ -79,3 +79,25 @@ class QAEntryRow(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     answered_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class GrowthPathRow(Base):
+    """The whole GrowthPath as a JSONB blob (schemas.GrowthPath is the serialization boundary).
+    Independent of the sessions table; teaching sessions ("<path_id>:<class_id>") create their own
+    sessions rows lazily."""
+    __tablename__ = "growth_paths"
+
+    path_id: Mapped[str] = mapped_column(String, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)  # GrowthPath.model_dump()
+    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PathMemoryRow(Base):
+    """Cross-class memory (PathMemory) as a JSONB blob, keyed by path_id."""
+    __tablename__ = "path_memory"
+
+    path_id: Mapped[str] = mapped_column(String, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)  # PathMemory.model_dump()
+    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

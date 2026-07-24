@@ -53,5 +53,8 @@ class Settings(BaseSettings):
     store_backend: str = "memory"
     database_url: str = ""
 
+    # --- Learning plan (curriculum). Default number of classes when scope/build don't decide one. ---
+    default_classes: int = 5
+
 
 settings = Settings()

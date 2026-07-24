@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ..schemas import (
     Anomaly,
     ChunkAnalysis,
+    ClassUnit,
+    GrowthPath,
+    PathMemory,
     QAEntry,
     QuestionDelta,
     RunResult,
@@ -21,7 +24,16 @@ from ..schemas import (
     TargetedQuestion,
     WordScore,
 )
-from .models import AnalysisRow, Base, QAEntryRow, RunRow, SegmentRow, SessionRow
+from .models import (
+    AnalysisRow,
+    Base,
+    GrowthPathRow,
+    PathMemoryRow,
+    QAEntryRow,
+    RunRow,
+    SegmentRow,
+    SessionRow,
+)
 
 
 def _analysis_values(session_id: str, a: ChunkAnalysis) -> dict:
@@ -305,3 +317,56 @@ class DbStore:
                 )
             ).scalar_one_or_none()
             return topic or ""
+
+    # ---- learning plan (growth path) ----
+
+    async def save_path(self, path: GrowthPath) -> None:
+        async with self._sessionmaker() as s:
+            payload = path.model_dump()
+            await s.execute(
+                pg_insert(GrowthPathRow)
+                .values(path_id=path.path_id, payload=payload)
+                .on_conflict_do_update(index_elements=["path_id"], set_={"payload": payload})
+            )
+            await s.commit()
+
+    async def get_path(self, path_id: str) -> GrowthPath | None:
+        async with self._sessionmaker() as s:
+            row = (
+                await s.execute(
+                    select(GrowthPathRow).where(GrowthPathRow.path_id == path_id)
+                )
+            ).scalar_one_or_none()
+            return GrowthPath.model_validate(row.payload) if row else None
+
+    async def save_class(self, path_id: str, cls: ClassUnit) -> None:
+        """Replace a class in the stored path (persists generated notes). Read-modify-write the blob."""
+        path = await self.get_path(path_id)
+        if path is None:
+            return
+        for i, c in enumerate(path.classes):
+            if c.class_id == cls.class_id:
+                path.classes[i] = cls
+                break
+        await self.save_path(path)
+
+    # ---- cross-class memory ----
+
+    async def get_memory(self, path_id: str) -> PathMemory:
+        async with self._sessionmaker() as s:
+            row = (
+                await s.execute(
+                    select(PathMemoryRow).where(PathMemoryRow.path_id == path_id)
+                )
+            ).scalar_one_or_none()
+            return PathMemory.model_validate(row.payload) if row else PathMemory(path_id=path_id)
+
+    async def update_memory(self, path_id: str, memory: PathMemory) -> None:
+        async with self._sessionmaker() as s:
+            payload = memory.model_dump()
+            await s.execute(
+                pg_insert(PathMemoryRow)
+                .values(path_id=path_id, payload=payload)
+                .on_conflict_do_update(index_elements=["path_id"], set_={"payload": payload})
+            )
+            await s.commit()

@@ -143,6 +143,81 @@ class ChunkQuestionResponse(BaseModel):
     question: Optional[TargetedQuestion] = None
 
 
+# ---- learning plan: growth path + classes + cross-class memory ----
+
+class ClassUnit(BaseModel):
+    """One class = one topic the learner must understand by teaching it. No subtopics — a class is
+    the unit of teaching. Teacher's notes are generated lazily, right before the class starts."""
+    class_id: str
+    title: str                          # "Newton's Laws of Motion" — the class IS the topic
+    objective: str                      # one-sentence learning goal
+    difficulty: str = "beginner"        # beginner | intermediate | advanced
+    prerequisites: list[str] = Field(default_factory=list)  # class_ids that should come first
+    teacher_notes: str = ""             # Markdown primer, generated lazily (may embed ```mermaid)
+    notes_generated: bool = False
+
+
+class GrowthPath(BaseModel):
+    """The learner's teaching plan: a confirmed topic broken into ~5 ordered classes."""
+    path_id: str
+    original_input: str                 # "I want to learn physics"
+    confirmed_topic: str                # "Classical Mechanics: Forces and Motion"
+    total_classes: int
+    recommended_order: list[str] = Field(default_factory=list)  # class_ids in sequence
+    classes: list[ClassUnit] = Field(default_factory=list)
+    source_material_summary: Optional[str] = None   # short summary of any pasted material
+
+
+class ScopeSuggestion(BaseModel):
+    topic: str
+    rationale: str
+    suggested_classes: int
+
+
+class TopicScope(BaseModel):
+    """Result of scoping the learner's request. If too broad, offer 3 narrower alternatives."""
+    is_broad: bool
+    suggestions: list[ScopeSuggestion] = Field(default_factory=list)
+    confirmed_topic: str
+    suggested_classes: int
+
+
+class PathMemory(BaseModel):
+    """Durable cross-class memory so the AI doesn't re-teach or re-ask across classes. Keyed by
+    path_id (spans every class in the plan)."""
+    path_id: str
+    covered_concepts: list[str] = Field(default_factory=list)  # already taught → don't re-teach
+    asked_questions: list[str] = Field(default_factory=list)   # already asked → no near-duplicates
+    understood: list[str] = Field(default_factory=list)        # learner got it → skip
+    struggled: list[str] = Field(default_factory=list)         # didn't get it → OK to re-probe
+
+
+# ---- learning-plan API I/O ----
+
+class ScopeRequest(BaseModel):
+    original_input: str
+    material_text: Optional[str] = None
+    preferred_classes: Optional[int] = None
+
+
+class BuildPlanRequest(BaseModel):
+    original_input: str
+    confirmed_topic: str
+    num_classes: Optional[int] = None
+    material_text: Optional[str] = None
+
+
+class TeachTurnBody(BaseModel):
+    latest_utterance: str
+
+
+class ClassTeachResponse(BaseModel):
+    student_reply: str
+    new_segment: Segment
+    asked: bool = False
+    question: Optional[TargetedQuestion] = None
+
+
 # ---- API I/O ----
 
 class IngestRequest(BaseModel):

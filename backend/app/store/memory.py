@@ -8,7 +8,17 @@ behaviour routes relied on before the Store abstraction.
 """
 import time
 
-from ..schemas import ChunkAnalysis, QAEntry, RunResult, Score, Segment, TargetedQuestion
+from ..schemas import (
+    ChunkAnalysis,
+    ClassUnit,
+    GrowthPath,
+    PathMemory,
+    QAEntry,
+    RunResult,
+    Score,
+    Segment,
+    TargetedQuestion,
+)
 
 # Process-wide state, keyed by session_id.
 _transcripts: dict[str, list[Segment]] = {}
@@ -17,6 +27,9 @@ _scores: dict[str, list[Score]] = {}
 _chunk_analyses: dict[str, list[ChunkAnalysis]] = {}
 _qa_ledger: dict[str, list[QAEntry]] = {}
 _topics: dict[str, str] = {}
+# Learning plan + cross-class memory, keyed by path_id.
+_paths: dict[str, GrowthPath] = {}
+_path_memory: dict[str, PathMemory] = {}
 
 
 class MemoryStore:
@@ -105,3 +118,29 @@ class MemoryStore:
 
     async def get_topic(self, session_id: str) -> str:
         return _topics.get(session_id, "")
+
+    # ---- learning plan (growth path) ----
+
+    async def save_path(self, path: GrowthPath) -> None:
+        _paths[path.path_id] = path
+
+    async def get_path(self, path_id: str) -> GrowthPath | None:
+        return _paths.get(path_id)
+
+    async def save_class(self, path_id: str, cls: ClassUnit) -> None:
+        """Replace a class in the stored path (used to persist generated notes)."""
+        path = _paths.get(path_id)
+        if path is None:
+            return
+        for i, c in enumerate(path.classes):
+            if c.class_id == cls.class_id:
+                path.classes[i] = cls
+                return
+
+    # ---- cross-class memory ----
+
+    async def get_memory(self, path_id: str) -> PathMemory:
+        return _path_memory.setdefault(path_id, PathMemory(path_id=path_id))
+
+    async def update_memory(self, path_id: str, memory: PathMemory) -> None:
+        _path_memory[path_id] = memory

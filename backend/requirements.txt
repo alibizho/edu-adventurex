@@ -8,3 +8,5 @@ httpx                   # async client -> ml-service /analyze
 python-multipart        # audio uploads to /confusion/analyze
 sqlalchemy>=2.0         # ORM + async engine for the Postgres context store
 asyncpg                 # async Postgres driver for SQLAlchemy
+langchain>=1,<2         # curriculum/plan orchestration (scope, structure, notes)
+langchain-openai>=1,<2  # ChatOpenAI over the OpenAI-compatible DeepSeek endpoint

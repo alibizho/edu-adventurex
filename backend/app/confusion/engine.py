@@ -11,6 +11,7 @@ uncertain/confused. The backend targets the LOWEST-confidence chunks.
 """
 import re
 
+from ..config import settings
 from ..schemas import Anomaly, ChunkAnalysis
 
 # Uncertainty markers → lower confidence. Weight is how much each drags confidence down.
@@ -80,3 +81,15 @@ def has_confusion_markers(text: str) -> bool:
     if _HEDGE_RE.search(text):
         return True
     return text.strip().endswith("?")
+
+
+def is_confused(analysis: ChunkAnalysis) -> bool:
+    """The shared confusion gate for both the real-time endpoint (/questions/from_chunk) and the
+    plan teaching turn. A chunk is 'confused' when anomaly-gating is on AND it has an anomaly, OR
+    its confidence is below the threshold, OR it carries a lexical hesitation marker. Keep both
+    call sites on this one definition so they can't drift."""
+    return (
+        (settings.question_gate_on_anomalies and bool(analysis.anomalies))
+        or analysis.confidence < settings.question_confidence_threshold
+        or has_confusion_markers(analysis.text)
+    )
