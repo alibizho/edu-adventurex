@@ -32,8 +32,10 @@ _HEDGE_RE = re.compile(
 
 
 def _mock_confidence(text: str) -> tuple[float, list[Anomaly]]:
-    low = text.lower()
-    hits = [h for h in _HEDGES if h in low]
+    # Word-boundary matched via the shared _HEDGE_RE so substrings don't fire ("er" in "router",
+    # "um" in "column") — same guard has_confusion_markers uses. Dedupe so a repeated marker
+    # counts once, matching the original "distinct markers" semantics.
+    hits = list(dict.fromkeys(m.strip().lower() for m in _HEDGE_RE.findall(text)))
     if text.strip().endswith("?"):
         hits.append("?")  # a declarative that trails off into a question reads as uncertain
     confidence = max(0.1, 1.0 - 0.22 * len(hits))

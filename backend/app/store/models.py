@@ -3,7 +3,7 @@ per_question, scores) are JSONB. The Pydantic models in schemas.py are the seria
 rows convert to/from them via .model_dump() / .model_validate() (see store/db.py)."""
 from datetime import datetime, timezone
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -21,7 +21,8 @@ class SessionRow(Base):
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     topic: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(default=_now)
+    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class SegmentRow(Base):
@@ -62,7 +63,7 @@ class RunRow(Base):
     calibration_rho: Mapped[float | None] = mapped_column(Float, nullable=True)
     per_question: Mapped[list] = mapped_column(JSONB, default=list)  # list[QuestionDelta] as dicts
     scores: Mapped[list] = mapped_column(JSONB, default=list)        # list[Score] as dicts
-    created_at: Mapped[datetime] = mapped_column(default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class QAEntryRow(Base):
