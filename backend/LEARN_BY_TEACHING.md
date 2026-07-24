@@ -1,0 +1,371 @@
+# Learn by Teaching — Plan API
+
+The "learn by teaching" flow: a learner names a topic, we build a **plan of ~5 classes**, generate
+a brief **teacher's-notes** primer before each class, then the learner **teaches the class to an AI
+student**. The AI knows nothing and only asks / restates / admits confusion — and when the learner
+*sounds unsure*, it fires one targeted question about exactly that spot. **Cross-class memory**
+keeps it from asking near-duplicate questions across classes.
+
+This layer is additive: it reuses the existing confusion gate + targeted-question pipeline. All
+endpoints are under the `/plan` prefix and are auto-documented at `/docs`.
+
+> Every example below is **real captured output** from the running app (DeepSeek `deepseek-chat`).
+
+---
+
+## The flow at a glance
+
+```
+ "I want to learn physics"
+        │
+        ▼
+ ①  POST /plan/scope ───────────► too broad? → 3 narrower options
+        │                          scoped?    → confirmed topic
+        │  (learner picks a topic)
+        ▼
+ ②  POST /plan/build ───────────► GrowthPath: ~5 ordered classes
+        │                          (titles + objectives, NO notes yet)
+        │
+        │  ┌──────────────── for each class, in order ───────────────┐
+        ▼  ▼                                                          │
+ ③  POST /plan/{id}/class/{cid}/notes  ─► Markdown teacher's notes    │
+        │      (learner reads it to prepare to teach)                 │
+        ▼                                                             │
+ ④  POST /plan/{id}/class/{cid}/teach/turn  (repeat many times)       │
+        │   learner teaches → AI student replies;                     │
+        │   a question fires ONLY when the learner sounds unsure       │
+        ▼                                                             │
+ ⑤  POST /plan/{id}/class/{cid}/end   ("End class")                   │
+        │   folds the class into cross-class memory                   │
+        └──────────────── then the next class → ③ ───────────────────┘
+```
+
+Each class runs on its own store session: `session_id = "{path_id}:{class_id}"`.
+
+---
+
+## Data models
+
+```python
+GrowthPath:                          # the learning plan
+  path_id: str                       # "gp-18d8e54a" (server-assigned)
+  original_input: str                # "I want to learn physics"
+  confirmed_topic: str               # "Classical Mechanics: Forces and Motion"
+  total_classes: int
+  recommended_order: list[str]       # ["c1","c2","c3"] — teaching sequence
+  classes: list[ClassUnit]
+  source_material_summary: str|None  # short summary if material_text was pasted
+
+ClassUnit:                           # one class = one topic (no subtopics)
+  class_id: str                      # "c1"
+  title: str                         # "Introduction to Forces"
+  objective: str                     # one-sentence learning goal
+  difficulty: str                    # "beginner" | "intermediate" | "advanced"
+  prerequisites: list[str]           # class_ids that should come first
+  teacher_notes: str                 # Markdown primer (filled lazily)
+  notes_generated: bool              # false until /notes has run
+
+PathMemory:                          # cross-class memory (per path_id)
+  path_id: str
+  covered_concepts: list[str]        # already taught → notes don't re-teach
+  asked_questions: list[str]         # already asked → no near-duplicates
+  understood: list[str]              # learner answered the probe
+  struggled: list[str]               # learner left the probe unanswered
+```
+
+---
+
+## ① `POST /plan/scope` — confirm or narrow the topic
+
+Decide whether the request is teachable as-is. If it spans multiple domains (e.g. "physics"), it's
+**too broad** and we return 3 narrower options for the learner to choose from.
+
+**Request** — `ScopeRequest`
+```json
+{
+  "original_input": "I want to learn physics",
+  "material_text": null,
+  "preferred_classes": null
+}
+```
+
+**Response** — `TopicScope` (this input is too broad)
+```json
+{
+  "is_broad": true,
+  "suggestions": [
+    {
+      "topic": "Classical Mechanics: Forces and Motion",
+      "rationale": "Covers Newton's laws, kinematics, and dynamics — the foundational pillars of physics that are self-contained and teachable in a focused sequence.",
+      "suggested_classes": 6
+    },
+    {
+      "topic": "Electricity and Magnetism: Circuits and Fields",
+      "rationale": "A coherent domain covering charge, current, voltage, resistance, and basic circuit analysis without needing other physics subfields.",
+      "suggested_classes": 6
+    },
+    {
+      "topic": "Waves and Sound: Properties and Behavior",
+      "rationale": "Focuses on wave types, superposition, frequency, amplitude, and sound phenomena as a standalone topic with clear learning objectives.",
+      "suggested_classes": 5
+    }
+  ],
+  "confirmed_topic": "Classical Mechanics: Forces and Motion",
+  "suggested_classes": 6
+}
+```
+
+- **Frontend:** if `is_broad`, show the `suggestions` as pickable cards. If `is_broad: false`,
+  `suggestions` is empty and `confirmed_topic` is ready to build directly.
+
+---
+
+## ② `POST /plan/build` — build the plan skeleton
+
+Turns a confirmed topic into an ordered set of classes. **No teacher's notes yet** — those are
+generated lazily, one class at a time.
+
+**Request** — `BuildPlanRequest`
+```json
+{
+  "original_input": "I want to learn physics",
+  "confirmed_topic": "Classical Mechanics: Forces and Motion",
+  "num_classes": 3,
+  "material_text": null
+}
+```
+
+**Response** — `GrowthPath`
+```json
+{
+  "path_id": "gp-18d8e54a",
+  "original_input": "I want to learn physics",
+  "confirmed_topic": "Classical Mechanics: Forces and Motion",
+  "total_classes": 3,
+  "recommended_order": ["c1", "c2", "c3"],
+  "classes": [
+    {
+      "class_id": "c1",
+      "title": "Introduction to Forces",
+      "objective": "Learner will be able to define a force, identify common types of forces, and explain how forces affect the motion of an object.",
+      "difficulty": "beginner",
+      "prerequisites": [],
+      "teacher_notes": "",
+      "notes_generated": false
+    },
+    {
+      "class_id": "c2",
+      "title": "Newton's Laws of Motion",
+      "objective": "Learner will be able to state and apply Newton's three laws of motion to predict the behavior of objects under various forces.",
+      "difficulty": "beginner",
+      "prerequisites": ["c1"],
+      "teacher_notes": "",
+      "notes_generated": false
+    },
+    {
+      "class_id": "c3",
+      "title": "Applications of Forces and Motion",
+      "objective": "Learner will be able to solve real-world problems involving friction, tension, and inclined planes using free-body diagrams and Newton's laws.",
+      "difficulty": "intermediate",
+      "prerequisites": ["c1", "c2"],
+      "teacher_notes": "",
+      "notes_generated": false
+    }
+  ],
+  "source_material_summary": null
+}
+```
+
+- `num_classes` is optional (defaults to `settings.default_classes` = 5). An explicit `0` is not
+  silently swapped for the default; it's clamped to a minimum of 1.
+- The plan is **saved** — fetch it again anytime with ③.
+
+---
+
+## ③ `GET /plan/{path_id}` — fetch the plan
+
+Returns the stored `GrowthPath` (same shape as ②), with `teacher_notes` filled in for whichever
+classes have had ④ run. `404` if the `path_id` is unknown.
+
+```
+GET /plan/gp-18d8e54a  →  200  { ...GrowthPath... }
+```
+
+---
+
+## ④ `POST /plan/{path_id}/class/{class_id}/notes` — teacher's notes ("before each class")
+
+Generates a **brief Markdown primer** (~200–400 words) the learner reads to prepare to teach. May
+embed **one** ```` ```mermaid ```` diagram; **never images**. It's told what earlier classes
+covered (from the class order + memory) so it builds on them instead of repeating.
+
+**Request:** none (path params only).
+
+**Response** — the enriched `ClassUnit` (`notes_generated` flips to `true`)
+```json
+{
+  "class_id": "c1",
+  "title": "Introduction to Forces",
+  "objective": "Learner will be able to define a force, identify common types of forces, and explain how forces affect the motion of an object.",
+  "difficulty": "beginner",
+  "prerequisites": [],
+  "teacher_notes": "## Introduction to Forces\n\nA **force** is simply a push or a pull...\n\n## Key Ideas\n...\n\n## Common Pitfalls\n...",
+  "notes_generated": true
+}
+```
+
+The `teacher_notes` string is Markdown. Rendered, it looks like:
+
+> ## Introduction to Forces
+>
+> A **force** is simply a push or a pull. It's the way objects interact with each other. Forces are
+> the "engines" of motion... We measure force in **newtons (N)**. A force has both a **size**
+> (magnitude) and a **direction**, making it a **vector** quantity.
+>
+> ## Key Ideas
+> ### How Forces Affect Motion
+> - A force can **start** an object moving, **stop** it, **speed it up**, **slow it down**, or **change its direction**.
+> - If multiple forces act on an object, we consider the **net force**.
+> - **Balanced forces** (net = 0) → no change. **Unbalanced forces** (net ≠ 0) → acceleration.
+>
+> ### Common Types of Forces
+> - **Gravity**, **Friction**, **Normal force**, **Tension**, **Applied force** …
+>
+> ## Common Pitfalls
+> - **Forces don't need contact** — gravity works at a distance.
+> - **Motion doesn't require a continuous force** … (covered in Newton's First Law)
+> - **Don't confuse mass and weight** …
+
+> **Note:** for a class that has a structural/flow relationship, the notes may include a fenced
+> ` ```mermaid ` block — the frontend renders it as a diagram (no image files involved).
+
+---
+
+## ⑤ `POST /plan/{path_id}/class/{class_id}/teach/turn` — teach a turn
+
+The learner says something; the AI student replies in character. The utterance runs through the
+**confusion gate** (`engine.is_confused` — the *same* gate as the real-time endpoint). A question
+fires **only** when the learner sounds unsure, and never repeats a question already asked anywhere
+in this path.
+
+**Request** — `TeachTurnBody`
+```json
+{ "latest_utterance": "A force is a push or a pull that changes an object's motion." }
+```
+
+**Response — confident utterance (`asked: false`)**
+```json
+{
+  "student_reply": "Wait... so if I push my pencil across the desk, that's a force, but what about when I just hold it still in my hand? Is that still a force?",
+  "new_segment": { "id": 0, "idx": 0, "text": "A force is a push or a pull that changes an object's motion.", "t_start": null, "t_end": null },
+  "asked": false,
+  "question": null
+}
+```
+
+**Request — a hesitant utterance**
+```json
+{ "latest_utterance": "um, i think a force is maybe like, kind of a push? i'm not sure." }
+```
+
+**Response — unsure utterance (`asked: true`, a targeted question fires)**
+```json
+{
+  "student_reply": "Wait, so is it just a push, or can it also be a pull? I thought you said it changes motion.",
+  "new_segment": { "id": 1, "idx": 1, "text": "um, i think a force is maybe like, kind of a push? i'm not sure.", "t_start": null, "t_end": null },
+  "asked": true,
+  "question": {
+    "id": 0,
+    "chunk_id": 1,
+    "text": "You said a force is 'kind of a push' — what else could a force be, if not just a push?",
+    "anomaly_type": "hedging",
+    "rationale": "The learner hedged with 'kind of a push' and 'i'm not sure.' This question draws them out on the other half of the definition (pull) without revealing the answer."
+  }
+}
+```
+
+- The gate fires on low confidence **or** lexical hesitation markers ("um", "maybe", "kind of",
+  trailing "?"). A clear statement produces `asked: false`.
+- To record the learner's answer to a fired question (so it counts as *understood* at end-of-class),
+  reuse the existing `POST /questions/answer` with `session_id = "{path_id}:{class_id}"` and the
+  `question.id`.
+
+---
+
+## ⑥ `POST /plan/{path_id}/class/{class_id}/end` — "End class"
+
+Folds the class into cross-class memory: the class title becomes a covered concept; answered probes
+count as *understood*, unanswered probes as *struggled*.
+
+**Request:** none (path params only).
+
+**Response** — `PathMemory`
+```json
+{
+  "path_id": "gp-18d8e54a",
+  "covered_concepts": ["Introduction to Forces"],
+  "asked_questions": [
+    "You said a force is 'kind of a push' — what else could a force be, if not just a push?"
+  ],
+  "understood": [],
+  "struggled": [
+    "You said a force is 'kind of a push' — what else could a force be, if not just a push?"
+  ]
+}
+```
+
+---
+
+## How the cross-class memory works
+
+`PathMemory` (one record per `path_id`) is the durable "what has happened on this path so far":
+
+- **`asked_questions`** — on every teaching turn, all previously-asked questions (across *every*
+  class) are handed to the question generator as "do **NOT** repeat any of these." Because the
+  generator is also told to "ask something genuinely new," a learner who keeps hesitating on the
+  same idea still gets re-probed — from a fresh angle. That's the "only re-ask if they don't get it"
+  behavior.
+- **`covered_concepts`** — feeds the notes generator ("build on these; don't re-teach"). Also seeded
+  from the titles of classes earlier in `recommended_order`, so notes stay coherent even if you
+  generate them before teaching the earlier classes.
+- **`understood` / `struggled`** — a lightweight per-class signal from which probes got answered.
+
+---
+
+## Running it
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --port 8000          # in-memory store (dev default)
+# open http://localhost:8000/docs for the interactive schema
+```
+
+Config knobs (`app/config.py` / `.env`): `GENERATOR_MODEL` / `GENERATOR_BASE_URL` (DeepSeek by
+default), `default_classes` (5), and the confusion gate's `question_confidence_threshold` (0.5).
+For durability across restarts run with `STORE_BACKEND=db` + `DATABASE_URL` (Postgres) — the plan
+and memory persist to the `growth_paths` / `path_memory` tables.
+
+### Minimal end-to-end (curl)
+
+```bash
+BASE=http://localhost:8000
+
+# ① scope
+curl -s $BASE/plan/scope -H 'content-type: application/json' \
+  -d '{"original_input":"I want to learn physics"}'
+
+# ② build (pick a confirmed topic from the scope response)
+PID=$(curl -s $BASE/plan/build -H 'content-type: application/json' \
+  -d '{"original_input":"I want to learn physics","confirmed_topic":"Classical Mechanics: Forces and Motion","num_classes":3}' \
+  | python -c 'import sys,json;print(json.load(sys.stdin)["path_id"])')
+
+# ③ notes for the first class
+curl -s $BASE/plan/$PID/class/c1/notes
+
+# ④ teach a turn
+curl -s $BASE/plan/$PID/class/c1/teach/turn -H 'content-type: application/json' \
+  -d '{"latest_utterance":"um, i think a force is maybe kind of a push?"}'
+
+# ⑤ end the class
+curl -s $BASE/plan/$PID/class/c1/end
+```
