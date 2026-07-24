@@ -4,14 +4,16 @@
   build_plan          -> GrowthPath         (structure into ~5 ordered classes, no notes yet)
   generate_class_notes -> Markdown str      (brief teacher's notes for one class, memory-aware)
 
-Structured shapes are produced with `.with_structured_output(..., method="function_calling")`
-(DeepSeek supports tool calling; json_schema mode is not guaranteed). Draft models keep the LLM
+Structured shapes are produced with `.with_structured_output(..., method="json_mode")`.
+Draft models keep the LLM
 from filling `teacher_notes` / `notes_generated` — those are set lazily by the notes step.
 """
 from __future__ import annotations
 
+import json
 import uuid
 
+from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -40,6 +42,18 @@ class _CurriculumDraft(BaseModel):
     recommended_order: list[str] = Field(default_factory=list)
 
 
+class CurriculumGenerationError(RuntimeError):
+    """The model responded, but did not produce the requested curriculum shape."""
+
+
+def _json_system(prompt: str, schema: type[BaseModel]) -> str:
+    compact_schema = json.dumps(schema.model_json_schema(), separators=(",", ":"))
+    return (
+        f"{prompt}\n\nReturn ONLY one valid JSON object matching this schema exactly:\n"
+        f"{compact_schema}"
+    )
+
+
 def _material_section(material: str | None, limit: int = 6000) -> str:
     material = (material or "").strip()
     return f"\n\nMATERIAL PROVIDED (excerpt):\n{material[:limit]}" if material else ""
@@ -48,7 +62,7 @@ def _material_section(material: str | None, limit: int = 6000) -> str:
 async def scope_topic(req: ScopeRequest) -> TopicScope:
     """Confirm the topic or, if too broad, return 3 narrower options."""
     llm = generator_llm(temperature=0.2).with_structured_output(
-        TopicScope, method="function_calling"
+        TopicScope, method="json_mode"
     )
     pref = (
         f"\n\nPREFERRED NUMBER OF CLASSES: {req.preferred_classes}"
@@ -56,11 +70,17 @@ async def scope_topic(req: ScopeRequest) -> TopicScope:
         else ""
     )
     user = f'STUDENT REQUEST: "{req.original_input}"{_material_section(req.material_text)}{pref}'
-    result = await llm.ainvoke(
-        [{"role": "system", "content": SCOPE_SYSTEM}, {"role": "user", "content": user}]
-    )
+    try:
+        result = await llm.ainvoke(
+            [
+                {"role": "system", "content": _json_system(SCOPE_SYSTEM, TopicScope)},
+                {"role": "user", "content": user},
+            ]
+        )
+    except OutputParserException as exc:
+        raise CurriculumGenerationError("topic scoping returned invalid JSON") from exc
     if result is None:
-        raise RuntimeError("topic scoping failed: the model returned no structured output")
+        raise CurriculumGenerationError("topic scoping returned no structured output")
     return result
 
 
@@ -69,18 +89,27 @@ async def structure_curriculum(
 ) -> tuple[list[ClassUnit], list[str]]:
     """Return (classes, recommended_order) — titles/objectives/ordering only, no notes."""
     llm = generator_llm(temperature=0.3).with_structured_output(
-        _CurriculumDraft, method="function_calling"
+        _CurriculumDraft, method="json_mode"
     )
     user = (
         f'TOPIC: "{confirmed_topic}"\n'
         f"NUMBER OF CLASSES: {num_classes}"
         f"{_material_section(material)}"
     )
-    draft: _CurriculumDraft = await llm.ainvoke(
-        [{"role": "system", "content": STRUCTURE_SYSTEM}, {"role": "user", "content": user}]
-    )
+    try:
+        draft: _CurriculumDraft = await llm.ainvoke(
+            [
+                {
+                    "role": "system",
+                    "content": _json_system(STRUCTURE_SYSTEM, _CurriculumDraft),
+                },
+                {"role": "user", "content": user},
+            ]
+        )
+    except OutputParserException as exc:
+        raise CurriculumGenerationError("curriculum structure returned invalid JSON") from exc
     if draft is None or not draft.classes:
-        raise RuntimeError("curriculum structuring failed: the model returned no classes")
+        raise CurriculumGenerationError("curriculum structure returned no classes")
     classes = [
         ClassUnit(
             class_id=c.class_id,

@@ -6,14 +6,16 @@ session updates in place.
 """
 import time
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ..schemas import (
+    AnalysisJob,
     Anomaly,
     ChunkAnalysis,
     ClassUnit,
+    CurriculumUpdate,
     GrowthPath,
     PathMemory,
     QAEntry,
@@ -21,10 +23,12 @@ from ..schemas import (
     RunResult,
     Score,
     Segment,
+    StudentQuestion,
     TargetedQuestion,
     WordScore,
 )
 from .models import (
+    AnalysisJobRow,
     AnalysisRow,
     Base,
     GrowthPathRow,
@@ -45,6 +49,12 @@ def _analysis_values(session_id: str, a: ChunkAnalysis) -> dict:
         "localized_target": a.localized_target,
         "anomalies": [an.model_dump() for an in a.anomalies],
         "detail": [w.model_dump() for w in a.detail],
+        "student_question": (
+            a.student_question.model_dump() if a.student_question is not None else None
+        ),
+        "curriculum_update": (
+            a.curriculum_update.model_dump() if a.curriculum_update is not None else None
+        ),
     }
 
 
@@ -56,6 +66,16 @@ def _row_to_analysis(row: AnalysisRow) -> ChunkAnalysis:
         localized_target=row.localized_target,
         anomalies=[Anomaly.model_validate(a) for a in (row.anomalies or [])],
         detail=[WordScore.model_validate(w) for w in (row.detail or [])],
+        student_question=(
+            StudentQuestion.model_validate(row.student_question)
+            if row.student_question
+            else None
+        ),
+        curriculum_update=(
+            CurriculumUpdate.model_validate(row.curriculum_update)
+            if row.curriculum_update
+            else None
+        ),
     )
 
 
@@ -86,6 +106,13 @@ class DbStore:
     async def init(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # create_all does not add columns to an existing MVP database.
+            await conn.execute(
+                text("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS student_question JSONB")
+            )
+            await conn.execute(
+                text("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS curriculum_update JSONB")
+            )
 
     async def dispose(self) -> None:
         await self._engine.dispose()
@@ -154,7 +181,15 @@ class DbStore:
                     index_elements=["session_id", "chunk_id"],
                     set_={
                         k: vals[k]
-                        for k in ("text", "confidence", "localized_target", "anomalies", "detail")
+                        for k in (
+                            "text",
+                            "confidence",
+                            "localized_target",
+                            "anomalies",
+                            "detail",
+                            "student_question",
+                            "curriculum_update",
+                        )
                     },
                 )
             )
@@ -339,6 +374,13 @@ class DbStore:
             ).scalar_one_or_none()
             return GrowthPath.model_validate(row.payload) if row else None
 
+    async def list_paths(self) -> list[GrowthPath]:
+        async with self._sessionmaker() as s:
+            rows = (
+                await s.execute(select(GrowthPathRow).order_by(GrowthPathRow.created_at.desc()))
+            ).scalars().all()
+            return [GrowthPath.model_validate(row.payload) for row in rows]
+
     async def save_class(self, path_id: str, cls: ClassUnit) -> None:
         """Replace a class in the stored path (persists generated notes). Read-modify-write the blob."""
         path = await self.get_path(path_id)
@@ -368,5 +410,44 @@ class DbStore:
                 pg_insert(PathMemoryRow)
                 .values(path_id=path_id, payload=payload)
                 .on_conflict_do_update(index_elements=["path_id"], set_={"payload": payload})
+            )
+            await s.commit()
+
+    # ---- asynchronous transfer analysis jobs ----
+
+    async def get_analysis_job(self, session_id: str) -> AnalysisJob | None:
+        async with self._sessionmaker() as s:
+            row = (
+                await s.execute(
+                    select(AnalysisJobRow).where(AnalysisJobRow.session_id == session_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return AnalysisJob(
+                session_id=row.session_id,
+                status=row.status,
+                error=row.error,
+                updated_at=row.updated_at.timestamp(),
+            )
+
+    async def set_analysis_job(self, job: AnalysisJob) -> None:
+        from datetime import datetime, timezone
+
+        updated_at = datetime.fromtimestamp(job.updated_at, timezone.utc)
+        async with self._sessionmaker() as s:
+            await self._ensure_session(s, job.session_id)
+            await s.execute(
+                pg_insert(AnalysisJobRow)
+                .values(
+                    session_id=job.session_id,
+                    status=job.status,
+                    error=job.error,
+                    updated_at=updated_at,
+                )
+                .on_conflict_do_update(
+                    index_elements=["session_id"],
+                    set_={"status": job.status, "error": job.error, "updated_at": updated_at},
+                )
             )
             await s.commit()

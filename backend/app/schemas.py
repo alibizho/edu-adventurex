@@ -1,7 +1,7 @@
 """Shared data model. Everything downstream keys off `Segment.id` — do not change that
 contract without a heads-up (see README)."""
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -90,6 +90,18 @@ class WordScore(BaseModel):
     is_scattered: bool = False
 
 
+class StudentQuestion(BaseModel):
+    """Question produced on the GPU from the strongest detected anomaly."""
+    question_text: str
+    target_concept: str
+    anomaly_type: str
+
+
+class CurriculumUpdate(BaseModel):
+    """New, valid concepts introduced beyond the current curriculum context."""
+    added_concepts: list[str] = Field(default_factory=list)
+
+
 class ChunkAnalysis(BaseModel):
     chunk_id: int                   # aligns with the segment/clause spine when both exist
     text: str
@@ -97,6 +109,8 @@ class ChunkAnalysis(BaseModel):
     anomalies: list[Anomaly] = Field(default_factory=list)
     localized_target: Optional[str] = None   # the specific word that broke, if any (ml-service)
     detail: list[WordScore] = Field(default_factory=list)   # per-word Space-A detail (ml-service)
+    student_question: Optional[StudentQuestion] = None
+    curriculum_update: Optional[CurriculumUpdate] = None
 
 
 # ---- fusion: confidence x competence (report §6) ----
@@ -182,14 +196,27 @@ class TopicScope(BaseModel):
     suggested_classes: int
 
 
+class ClassProgressRecord(BaseModel):
+    status: Literal["not_started", "in_progress", "complete"] = "not_started"
+    readiness: int = 0
+    turn_count: int = 0
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
+    completion_mode: Optional[Literal["self-teaching", "guided-explanation"]] = None
+    analysis_status: Literal["not_started", "pending", "running", "complete", "failed"] = "not_started"
+    analysis_error: Optional[str] = None
+
+
 class PathMemory(BaseModel):
     """Durable cross-class memory so the AI doesn't re-teach or re-ask across classes. Keyed by
     path_id (spans every class in the plan)."""
     path_id: str
+    class_progress: dict[str, ClassProgressRecord] = Field(default_factory=dict)
     covered_concepts: list[str] = Field(default_factory=list)  # already taught → don't re-teach
     asked_questions: list[str] = Field(default_factory=list)   # already asked → no near-duplicates
     understood: list[str] = Field(default_factory=list)        # learner got it → skip
     struggled: list[str] = Field(default_factory=list)         # didn't get it → OK to re-probe
+    expanded_concepts: list[str] = Field(default_factory=list)  # valid beyond-scope concepts found live
 
 
 # ---- learning-plan API I/O ----
@@ -216,6 +243,55 @@ class ClassTeachResponse(BaseModel):
     new_segment: Segment
     asked: bool = False
     question: Optional[TargetedQuestion] = None
+
+
+class AudioClassTeachResponse(BaseModel):
+    """One browser-recorded teaching turn, including the GPU analysis when available."""
+    student_reply: str = ""
+    new_segment: Optional[Segment] = None
+    analysis: ChunkAnalysis
+    asked: bool = False
+    question: Optional[TargetedQuestion] = None
+    degraded: bool = False
+
+
+class EndClassRequest(BaseModel):
+    completion_mode: Literal["self-teaching", "guided-explanation"] = "self-teaching"
+
+
+class MaterialFileSummary(BaseModel):
+    name: str
+    media_type: str
+    size: int
+    extracted_characters: int
+
+
+class MaterialExtractionResponse(BaseModel):
+    material_text: str
+    files: list[MaterialFileSummary]
+    warnings: list[str] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class AnalysisJob(BaseModel):
+    session_id: str
+    status: Literal["pending", "running", "complete", "failed"]
+    error: Optional[str] = None
+    updated_at: float
+
+
+class AnalysisStatusResponse(AnalysisJob):
+    run: Optional[RunResult] = None
+    fusion: Optional[FusionResult] = None
+
+
+class SessionSnapshot(BaseModel):
+    session_id: str
+    transcript: list[Segment] = Field(default_factory=list)
+    analyses: list[ChunkAnalysis] = Field(default_factory=list)
+    questions: list[QAEntry] = Field(default_factory=list)
+    run: Optional[RunResult] = None
+    fusion: Optional[FusionResult] = None
 
 
 # ---- API I/O ----

@@ -71,6 +71,7 @@ PathMemory:                          # cross-class memory (per path_id)
   asked_questions: list[str]         # already asked → no near-duplicates
   understood: list[str]              # learner answered the probe
   struggled: list[str]               # learner left the probe unanswered
+  expanded_concepts: list[str]       # valid beyond-scope concepts found during audio teaching
 ```
 
 ---
@@ -292,6 +293,20 @@ in this path.
 
 ---
 
+## `POST /plan/{path_id}/class/{class_id}/teach/audio-turn` — context-aware audio turn
+
+Send one recorded utterance as multipart form-data (`audio`, optional `chunk_id` and `history`).
+The route automatically supplies the GPU service with the current path topic, class objective,
+teacher notes, source-material summary, covered concepts, and previously expanded concepts.
+
+The response contains the saved transcript segment and full `ChunkAnalysis`. When the GPU returns
+`student_question`, that question becomes the AI Student reply and is added to cross-class question
+memory. When it returns `curriculum_update.added_concepts`, those concepts are persisted in
+`PathMemory.expanded_concepts` and included in later turns. If the GPU service is unavailable, the
+response explicitly sets `degraded: true` and does not fabricate a transcript or question.
+
+---
+
 ## ⑥ `POST /plan/{path_id}/class/{class_id}/end` — "End class"
 
 Folds the class into cross-class memory: the class title becomes a covered concept; answered probes
@@ -308,6 +323,7 @@ count as *understood*, unanswered probes as *struggled*.
     "You said a force is 'kind of a push' — what else could a force be, if not just a push?"
   ],
   "understood": [],
+  "expanded_concepts": ["environmental decoherence"],
   "struggled": [
     "You said a force is 'kind of a push' — what else could a force be, if not just a push?"
   ]
@@ -329,6 +345,8 @@ count as *understood*, unanswered probes as *struggled*.
   from the titles of classes earlier in `recommended_order`, so notes stay coherent even if you
   generate them before teaching the earlier classes.
 - **`understood` / `struggled`** — a lightweight per-class signal from which probes got answered.
+- **`expanded_concepts`** — valid above-and-beyond concepts returned by the live GPU analysis;
+  they become context for subsequent class turns instead of being discarded.
 
 ---
 

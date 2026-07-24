@@ -50,6 +50,8 @@ class AnalysisRow(Base):
     localized_target: Mapped[str | None] = mapped_column(Text, nullable=True)
     anomalies: Mapped[list] = mapped_column(JSONB, default=list)   # list[Anomaly] as dicts
     detail: Mapped[list] = mapped_column(JSONB, default=list)      # list[WordScore] as dicts
+    student_question: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    curriculum_update: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class RunRow(Base):
@@ -101,3 +103,12 @@ class PathMemoryRow(Base):
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)  # PathMemory.model_dump()
     # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AnalysisJobRow(Base):
+    __tablename__ = "analysis_jobs"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

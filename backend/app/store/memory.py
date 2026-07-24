@@ -9,6 +9,7 @@ behaviour routes relied on before the Store abstraction.
 import time
 
 from ..schemas import (
+    AnalysisJob,
     ChunkAnalysis,
     ClassUnit,
     GrowthPath,
@@ -30,6 +31,7 @@ _topics: dict[str, str] = {}
 # Learning plan + cross-class memory, keyed by path_id.
 _paths: dict[str, GrowthPath] = {}
 _path_memory: dict[str, PathMemory] = {}
+_analysis_jobs: dict[str, AnalysisJob] = {}
 
 
 class MemoryStore:
@@ -127,6 +129,9 @@ class MemoryStore:
     async def get_path(self, path_id: str) -> GrowthPath | None:
         return _paths.get(path_id)
 
+    async def list_paths(self) -> list[GrowthPath]:
+        return list(reversed(_paths.values()))
+
     async def save_class(self, path_id: str, cls: ClassUnit) -> None:
         """Replace a class in the stored path (used to persist generated notes)."""
         path = _paths.get(path_id)
@@ -144,3 +149,9 @@ class MemoryStore:
 
     async def update_memory(self, path_id: str, memory: PathMemory) -> None:
         _path_memory[path_id] = memory
+
+    async def get_analysis_job(self, session_id: str) -> AnalysisJob | None:
+        return _analysis_jobs.get(session_id)
+
+    async def set_analysis_job(self, job: AnalysisJob) -> None:
+        _analysis_jobs[job.session_id] = job

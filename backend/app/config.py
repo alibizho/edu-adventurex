@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     store_backend: str = "memory"
     database_url: str = ""
 
+    # Browser origins for the separately hosted Vite frontend. Parsed in app.main.
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+
     # --- Learning plan (curriculum). Default number of classes when scope/build don't decide one. ---
     default_classes: int = 5
 

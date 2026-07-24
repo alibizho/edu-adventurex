@@ -79,7 +79,8 @@ transferred and fuses it with the confusion signal.
 | GET | `/confusion/health` | — | `{reachable, ok, device, …}` | Is the GPU ml-service up? **Call before audio flows.** |
 | POST | `/teach/turn` | JSON `TeachTurnRequest` | `TeachTurnResponse` | One teaching turn → student reply + new segment. |
 | POST | `/questions/from_chunk` | multipart form | `ChunkQuestionResponse` | **Flow A:** audio chunk → (maybe) a question. |
-| POST | `/confusion/analyze` | multipart form | `ChunkAnalysis` | Audio chunk → confusion analysis only (no question). |
+| POST | `/confusion/analyze` | multipart form | `ChunkAnalysis` | Audio chunk → analysis, optional GPU question, and curriculum update. |
+| POST | `/plan/{path_id}/class/{class_id}/teach/audio-turn` | multipart form | `AudioClassTeachResponse` | Context-aware audio teaching turn used by the frontend. |
 | POST | `/confusion/ingest` | JSON `IngestRequest` | `{session_id, n_chunks}` | Bulk-store precomputed analyses. |
 | POST | `/confusion/mock` | `?session_id=` | `{session_id, n_chunks}` | Text-only heuristic analyses (no GPU). |
 | POST | `/measure` | `?session_id=` | `RunResult` | Transfer-delta measurement (slow). |
@@ -101,7 +102,9 @@ transferred and fuses it with the confusion signal.
 | `audio` | file | yes | WAV, ideally 16 kHz mono. |
 | `topic` | string | no | The lesson topic. Stored on the session; send once, reused after. |
 | `history` | string (JSON array) | no | Prior transcript texts for context. If omitted, the session's prior chunk transcripts are used. |
-| `enable_space_c` | bool | no (default `false`) | Fact-check on/off. Leave false for this flow. |
+| `enable_space_c` | bool | no (default `false`) | Fact-check on/off. Enable when curriculum context is supplied. |
+| `curriculum_context` | string | no | Current objective, notes, and source context for Space C. |
+| `key_concepts` | string (JSON array) | no | Known and newly expanded concepts. |
 
 **Response — `ChunkQuestionResponse`:**
 ```json
@@ -208,9 +211,10 @@ returns partial results (uncrossed segments show `quadrant: "unknown"`).
 ### `POST /confusion/analyze` — audio → analysis only
 
 Same multipart shape as `/questions/from_chunk` (`session_id`, `chunk_id`, `audio`, optional
-`history`, `enable_space_c`) but **no `topic`**, and it returns just the `ChunkAnalysis` (no
-question). Use this when you want the confusion signal without generating a question, or to feed
-`/fusion`.
+`history`, `enable_space_c`, `overall_topic`, `curriculum_context`, and `key_concepts`). It returns
+the complete `ChunkAnalysis`, including an optional GPU-generated `student_question` and optional
+`curriculum_update`. Use this when you want the signal without running the main-backend fallback
+question generator, or to feed `/fusion`.
 
 ### `POST /questions/next` — questions for the weakest chunks
 
@@ -236,7 +240,9 @@ Returns `{"session_id", "question_id", "recorded": true}`. Marks the question an
 
 ```
 Segment          { id, idx, text, t_start?, t_end? }
-ChunkAnalysis    { chunk_id, text, confidence, anomalies: [Anomaly], localized_target?, detail: [WordScore] }
+ChunkAnalysis    { chunk_id, text, confidence, anomalies: [Anomaly], localized_target?, detail: [WordScore], student_question?, curriculum_update? }
+StudentQuestion  { question_text, target_concept, anomaly_type }
+CurriculumUpdate { added_concepts: [string] }
 Anomaly          { type, source, score, evidence? }     # type: factual_error | logic_error | recall_failure | hedging
 TargetedQuestion { id, chunk_id, text, anomaly_type?, rationale? }
 ChunkQuestionResponse { asked: bool, analysis: ChunkAnalysis, question: TargetedQuestion? }

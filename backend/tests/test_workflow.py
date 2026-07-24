@@ -25,9 +25,12 @@ import app.api.plan_routes as plan_routes  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas import (  # noqa: E402
     ClassUnit,
+    ChunkAnalysis,
+    CurriculumUpdate,
     GrowthPath,
     PathMemory,
     ScopeSuggestion,
+    StudentQuestion,
     TeachTurnResponse,
     TargetedQuestion,
     TopicScope,
@@ -110,6 +113,8 @@ def test_full_workflow_two_classes(monkeypatch):
 
     # 3. GET finds the saved plan
     assert client.get(f"/plan/{pid}").json()["confirmed_topic"] == "Mechanics"
+    assert any(item["path_id"] == pid for item in client.get("/plan").json())
+    assert client.get(f"/plan/{pid}/memory").json()["path_id"] == pid
 
     # 4. notes for c1 (no earlier classes -> "none" in the primer)
     r = client.post(f"/plan/{pid}/class/c1/notes")
@@ -146,6 +151,16 @@ def test_full_workflow_two_classes(monkeypatch):
     assert r.json()["asked"] is True
     assert q1 in seen[-1], "c1's question must appear in c2's question-generation history (dedup)"
 
+    # 9. GPU unavailable is explicit and does not create a fake audio teaching turn.
+    r = client.post(
+        f"/plan/{pid}/class/c2/teach/audio-turn",
+        data={"chunk_id": 1, "history": "[]"},
+        files={"audio": ("chunk.wav", b"RIFFfakewavdata", "audio/wav")},
+    )
+    assert r.status_code == 200
+    assert r.json()["degraded"] is True
+    assert r.json()["new_segment"] is None
+
 
 def test_workflow_unknown_path_404(monkeypatch):
     _stub_llm()(monkeypatch)
@@ -173,3 +188,73 @@ def test_scope_broad_returns_suggestions(monkeypatch):
     assert body["is_broad"] is True
     assert len(body["suggestions"]) == 3
     assert all("topic" in s and "rationale" in s and "suggested_classes" in s for s in body["suggestions"])
+
+
+def test_audio_turn_uses_gpu_question_and_persists_curriculum_update(monkeypatch):
+    _stub_llm()(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_analyze_audio(audio_bytes, **kwargs):
+        captured.update(kwargs)
+        return (
+            ChunkAnalysis(
+                chunk_id=kwargs["chunk_id"],
+                text="Measurement can also lead us to decoherence.",
+                confidence=0.68,
+                student_question=StudentQuestion(
+                    question_text="Why is decoherence not exactly the same as collapse?",
+                    target_concept="decoherence",
+                    anomaly_type="beyond",
+                ),
+                curriculum_update=CurriculumUpdate(
+                    added_concepts=["environmental decoherence"]
+                ),
+            ),
+            False,
+        )
+
+    monkeypatch.setattr(
+        plan_routes.client,
+        "analyze_audio_with_status",
+        fake_analyze_audio,
+    )
+
+    built = client.post(
+        "/plan/build",
+        json={
+            "original_input": "mechanics",
+            "confirmed_topic": "Mechanics",
+            "num_classes": 2,
+        },
+    ).json()
+    pid = built["path_id"]
+    notes = client.post(f"/plan/{pid}/class/c1/notes")
+    assert notes.status_code == 200
+
+    response = client.post(
+        f"/plan/{pid}/class/c1/teach/audio-turn",
+        data={"chunk_id": 4, "history": '["Earlier explanation"]'},
+        files={"audio": ("chunk.wav", b"RIFFfakewavdata", "audio/wav")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert captured["overall_topic"] == "Mechanics"
+    assert "Define force." in str(captured["curriculum_context"])
+    assert "A primer." in str(captured["curriculum_context"])
+    assert "Forces" in captured["key_concepts"]
+    assert body["asked"] is True
+    assert body["question"]["text"] == "Why is decoherence not exactly the same as collapse?"
+    assert body["student_reply"] == body["question"]["text"]
+    assert body["analysis"]["curriculum_update"]["added_concepts"] == [
+        "environmental decoherence"
+    ]
+
+    memory = client.get(f"/plan/{pid}/memory").json()
+    assert memory["expanded_concepts"] == ["environmental decoherence"]
+    session = client.get(f"/sessions/{pid}:c1").json()
+    stored = session["analyses"][0]
+    assert stored["student_question"]["target_concept"] == "decoherence"
+    assert stored["curriculum_update"]["added_concepts"] == [
+        "environmental decoherence"
+    ]
