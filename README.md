@@ -10,9 +10,11 @@ explanation becomes a visible **blind spot** — the thing no rubric can catch.
 ## What's here
 
 ```
-backend/     FastAPI service: teaching loop, transfer-delta measurement, fusion, and real-time
-             per-chunk questions. Calls the ml-service for speech-confusion analysis.
-             HTTP contract + frontend guide: backend/API.md
+backend/     FastAPI service: the learn-by-teaching plan layer (scope → plan → teacher's notes →
+             teach → end, with cross-class memory), plus the teaching loop, transfer-delta
+             measurement, fusion, and real-time per-chunk questions. Calls the ml-service for
+             speech-confusion analysis. HTTP contract: backend/API.md;
+             learn-by-teaching guide: backend/LEARN_BY_TEACHING.md
 ml-service/  GPU confusion engine (Whisper ASR + Wav2Vec2/mDeBERTa/BGE + a judge LLM), deployed
              on Hyper AI. Setup: ml-service/README.md
 frontend/    React UI (placeholder — not started).
@@ -46,12 +48,35 @@ Runs `STORE_BACKEND=db`, so session context survives restarts. Inspect the DB wi
 
 ## How it fits together
 
-- **Real-time spoken class (primary flow):** the kid states a topic and teaches out loud. The
-  frontend sends each paused speech chunk to `POST /questions/from_chunk`; the ml-service analyzes
-  it and the backend generates a question only when the chunk sounded confused.
+- **Learn-by-teaching plan (primary flow):** the learner names a topic → `POST /plan/scope`
+  confirms or narrows it → `POST /plan/build` makes a ~5-class plan → before each class
+  `POST /plan/{id}/class/{cid}/notes` generates a brief Markdown teacher's-notes primer → the
+  learner teaches via `POST /plan/{id}/class/{cid}/teach/turn` (the AI student replies, and a
+  targeted question fires only when the learner sounds unsure) → `POST /plan/{id}/class/{cid}/end`
+  folds the class into cross-class memory so later classes don't re-teach or re-ask. Full walkthrough
+  with real request/response examples: [backend/LEARN_BY_TEACHING.md](backend/LEARN_BY_TEACHING.md).
+- **Real-time spoken class:** the kid states a topic and teaches out loud. The frontend sends each
+  paused speech chunk to `POST /questions/from_chunk`; the ml-service analyzes it and the backend
+  generates a question only when the chunk sounded confused. (Uses the same confusion gate as the
+  plan teaching turn.)
 - **Measurement flow:** `POST /teach/turn` builds a transcript → `POST /measure` runs the
   taught-vs-cold ensemble (transfer delta) → `GET /fusion/{id}` crosses disturbance × delta into
   per-segment quadrants (`blind_spot` / `aware_gap` / `productive_struggle` / `mastery`).
+
+## Tests
+
+```bash
+cd backend && source .venv/bin/activate
+python -m pytest                             # unit + curriculum + workflow (hermetic, no LLM/DB)
+```
+
+DB round-trips (need a reachable Postgres at `$DATABASE_URL`):
+```bash
+DATABASE_URL=postgresql+asyncpg://ts:ts@localhost:5432/teachable PYTHONPATH=. \
+  python tests/test_db_roundtrip.py          # existing tables
+DATABASE_URL=postgresql+asyncpg://ts:ts@localhost:5432/teachable PYTHONPATH=. \
+  python tests/test_db_plan_roundtrip.py     # growth_paths + path_memory, incl. restart durability
+```
 
 ## Status
 
