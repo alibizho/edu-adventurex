@@ -1,0 +1,39 @@
+# Teachable Student backend stack: Postgres (durable context store) + the FastAPI backend.
+# The ml-service is NOT here — it runs on Hyper AI (GPU). Put your LLM keys + the Hyper AI
+# ML_SERVICE_URL in backend/.env, then:
+#
+#   docker compose up --build
+#
+# Backend: http://localhost:8000/docs  (state now survives restarts — STORE_BACKEND=db)
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ts
+      POSTGRES_PASSWORD: ts
+      POSTGRES_DB: teachable
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ts"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false          # present if you've filled in LLM keys; optional for fresh clones
+    environment:
+      # These override anything in backend/.env — the compose-managed DB connection.
+      DATABASE_URL: postgresql+asyncpg://ts:ts@db:5432/teachable
+      STORE_BACKEND: db
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
