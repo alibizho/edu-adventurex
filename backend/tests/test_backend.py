@@ -177,7 +177,7 @@ def test_fuse_calibration_rho_positive_when_calibrated():
 # --------------------------------------------------------------------------- #
 
 def test_root_and_health():
-    assert client.get("/").json()["service"] == "teachable-student"
+    assert client.get("/").json()["service"] == "wut"
     assert client.get("/health").json() == {"ok": True}
 
 

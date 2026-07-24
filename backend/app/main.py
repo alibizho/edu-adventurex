@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     await store.dispose()
 
 
-app = FastAPI(title="Teachable Student", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="wut", version="0.1.0", lifespan=lifespan)
 
 # Open CORS for the hackathon so the frontend (whatever port) can hit the API.
 app.add_middleware(
@@ -34,4 +34,4 @@ app.include_router(plan_router)
 
 @app.get("/")
 async def root() -> dict:
-    return {"service": "teachable-student", "docs": "/docs"}
+    return {"service": "wut", "docs": "/docs"}

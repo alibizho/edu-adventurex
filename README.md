@@ -1,4 +1,4 @@
-# Teachable Student
+# wut
 
 A kid teaches an AI that knows nothing — and we **measure** how much actually got through, by
 experiment instead of a rubric. The AI plays a confused student (it only asks, restates, or admits
