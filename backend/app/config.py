@@ -25,5 +25,11 @@ class Settings(BaseSettings):
     # Grader verifier model; falls back to generator_model when empty.
     verifier_model: str = ""
 
+    # --- Confusion analysis (Instrument B/C) lives in the ml-service; the backend forwards audio
+    #     to it. On failure the client degrades to a neutral analysis so a demo never hard-fails.
+    #     The text-only /confusion/mock endpoint stays for offline dev without the GPU box. ---
+    ml_service_url: str = "http://localhost:8100"
+    ml_service_timeout: float = 60.0            # first call includes cold Whisper on the GPU box
+
 
 settings = Settings()

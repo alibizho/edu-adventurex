@@ -1,14 +1,17 @@
 """HTTP surface. Thin — orchestration lives in agents/ and pipeline/. Open /docs to poke it."""
-from fastapi import APIRouter, HTTPException
+import json
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
-from ..confusion import engine
+from ..confusion import client, engine
 from ..pipeline.filter import filter_questions
 from ..pipeline.scoring import score_ensemble
 from ..schemas import (
     AnswerRequest,
+    ChunkAnalysis,
     IngestRequest,
     NextQuestionsRequest,
     QAEntry,
@@ -57,9 +60,43 @@ async def measure(session_id: str) -> RunResult:
 
 # ---- confusion-driven targeted questioning ----
 
+@router.get("/confusion/health")
+async def confusion_health() -> dict:
+    """Report whether the ml-service confusion engine is reachable (and its own health)."""
+    return await client.health()
+
+
+@router.post("/confusion/analyze", response_model=ChunkAnalysis)
+async def confusion_analyze(
+    session_id: str = Form(...),
+    chunk_id: int = Form(0),
+    history: str = Form("[]"),          # JSON array of prior transcripts (Space B context)
+    enable_space_c: bool | None = Form(None),
+    audio: UploadFile = File(...),
+) -> ChunkAnalysis:
+    """Forward a recorded utterance to the ml-service confusion engine and store the analysis.
+    If `history` is empty, the session's prior segment texts are used as Space B context.
+    Degrades to a neutral analysis if the ml-service is unreachable (see confusion/client.py)."""
+    try:
+        hist = json.loads(history) if history else []
+        hist = [str(h) for h in hist] if isinstance(hist, list) else []
+    except json.JSONDecodeError:
+        hist = []
+    if not hist:
+        hist = [s.text for s in memory.get_transcript(session_id)]
+
+    audio_bytes = await audio.read()
+    analysis = await client.analyze_audio(
+        audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
+        history=hist, enable_space_c=enable_space_c,
+    )
+    memory.append_analysis(session_id, analysis)
+    return analysis
+
+
 @router.post("/confusion/ingest")
 async def confusion_ingest(req: IngestRequest) -> dict:
-    """Store per-chunk analyses from the confusion engine (the real ML posts here)."""
+    """Store per-chunk analyses from the confusion engine (an external ML can also post here)."""
     memory.set_analyses(req.session_id, req.chunks)
     return {"session_id": req.session_id, "n_chunks": len(req.chunks)}
 

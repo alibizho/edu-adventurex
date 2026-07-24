@@ -4,3 +4,5 @@ pydantic
 pydantic-settings
 openai
 python-dotenv
+httpx                   # async client -> ml-service /analyze
+python-multipart        # audio uploads to /confusion/analyze

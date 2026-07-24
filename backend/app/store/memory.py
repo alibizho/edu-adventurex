@@ -31,6 +31,17 @@ def set_analyses(session_id: str, analyses: list[ChunkAnalysis]) -> None:
     chunk_analyses[session_id] = analyses
 
 
+def append_analysis(session_id: str, analysis: ChunkAnalysis) -> None:
+    """Append one confusion analysis, replacing any existing entry with the same chunk_id (so a
+    re-analyzed utterance updates in place). Used by the streaming audio path."""
+    lst = chunk_analyses.setdefault(session_id, [])
+    for i, a in enumerate(lst):
+        if a.chunk_id == analysis.chunk_id:
+            lst[i] = analysis
+            return
+    lst.append(analysis)
+
+
 def get_analyses(session_id: str) -> list[ChunkAnalysis]:
     return chunk_analyses.setdefault(session_id, [])
 

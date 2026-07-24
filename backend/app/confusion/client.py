@@ -1,0 +1,61 @@
+"""Client for the ml-service confusion engine (Instrument B/C). The backend forwards a recorded
+utterance's audio to `POST {ml_service_url}/analyze` and gets back a ChunkAnalysis (hesitation +
+logic + fact anomalies, per-word detail). On any failure it degrades to a neutral analysis (high
+confidence, no anomalies) with a logged warning, so a live demo never hard-fails on a network blip.
+
+This is the AUDIO path. The text-only heuristic in engine.py stays as the offline/dev fallback.
+"""
+import json
+import logging
+
+import httpx
+
+from ..config import settings
+from ..schemas import ChunkAnalysis
+
+log = logging.getLogger("confusion.client")
+
+
+def _neutral(chunk_id: int, reason: str) -> ChunkAnalysis:
+    log.warning("ml-service analyze failed (%s); returning neutral analysis for chunk %d",
+                reason, chunk_id)
+    return ChunkAnalysis(chunk_id=chunk_id, text="", confidence=1.0)
+
+
+async def analyze_audio(
+    audio: bytes,
+    filename: str = "chunk.wav",
+    chunk_id: int = 0,
+    history: list[str] | None = None,
+    enable_space_c: bool | None = None,
+) -> ChunkAnalysis:
+    """Forward one utterance's audio to the ml-service and parse the ChunkAnalysis."""
+    data: dict[str, str] = {"chunk_id": str(chunk_id), "history": json.dumps(history or [])}
+    if enable_space_c is not None:
+        data["enable_space_c"] = str(enable_space_c).lower()
+    files = {"audio": (filename, audio, "audio/wav")}
+    url = f"{settings.ml_service_url.rstrip('/')}/analyze"
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.ml_service_timeout) as http:
+            resp = await http.post(url, data=data, files=files)
+        resp.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as e:
+        return _neutral(chunk_id, repr(e))
+
+    try:
+        return ChunkAnalysis.model_validate(resp.json())
+    except (ValueError, KeyError) as e:
+        return _neutral(chunk_id, f"bad payload: {e!r}")
+
+
+async def health() -> dict:
+    """Probe the ml-service /health so the backend can report whether the real engine is reachable."""
+    url = f"{settings.ml_service_url.rstrip('/')}/health"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            resp = await http.get(url)
+        resp.raise_for_status()
+        return {"reachable": True, **resp.json()}
+    except httpx.HTTPError as e:
+        return {"reachable": False, "error": repr(e), "url": url}

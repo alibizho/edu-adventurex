@@ -79,11 +79,24 @@ class Anomaly(BaseModel):
     evidence: Optional[str] = None  # ground-truth / context that triggered the flag
 
 
+class WordScore(BaseModel):
+    """Per-word Space-A detail from the ml-service (mock leaves this empty)."""
+    word: str
+    hesitation_zscore: float = 0.0
+    is_anomaly: bool = False
+    pace_zscore: float = 0.0
+    is_bottleneck: bool = False
+    attention_entropy: float = 0.0
+    is_scattered: bool = False
+
+
 class ChunkAnalysis(BaseModel):
     chunk_id: int                   # aligns with the segment/clause spine when both exist
     text: str
     confidence: float               # [0,1]; HIGH = speaker sounded clear, LOW = uncertain/confused
     anomalies: list[Anomaly] = Field(default_factory=list)
+    localized_target: Optional[str] = None   # the specific word that broke, if any (ml-service)
+    detail: list[WordScore] = Field(default_factory=list)   # per-word Space-A detail (ml-service)
 
 
 # ---- targeted-question agent + memory ----
