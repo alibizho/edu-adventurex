@@ -25,7 +25,7 @@ export ENABLE_SPACE_C="${ENABLE_SPACE_C:-1}"
 # judge = DeepSeek API (OpenAI-compatible) -> hosts NO LLM on the box.
 export JUDGE_BACKEND="${JUDGE_BACKEND:-api}"
 export JUDGE_API_BASE="${JUDGE_API_BASE:-https://api.deepseek.com}"
-export JUDGE_API_MODEL="${JUDGE_API_MODEL:-deepseek-chat}"
+export JUDGE_API_MODEL="${JUDGE_API_MODEL:-deepseek-v4-flash}"
 
 # 3. restore python deps only if the container wiped them (fast no-op once present)
 if ! python -c "import faster_whisper, fastapi, transformers, FlagEmbedding" 2>/dev/null; then

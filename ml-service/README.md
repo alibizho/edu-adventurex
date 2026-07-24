@@ -8,10 +8,26 @@ storage)**. The main backend calls it per recorded utterance and gets back a `Ch
 Per spoken utterance, three "spaces":
 - **A · audio ↔ text** — hesitation / recall failure (Wav2Vec2 + mDeBERTa → trained alignment brain)
 - **B · text ↔ text** — self-contradiction vs earlier speech (judge LLM)
-- **C · text ↔ knowledge** — factual error vs a Wikipedia vector DB (BGE-M3 + Chroma, judge LLM)
+- **C · text ↔ knowledge** — factual error vs the class being taught (judge LLM)
 
 Output = per-chunk `confidence ∈ [0,1]` (HIGH = clear) + typed anomalies
-(`recall_failure` / `logic_error` / `factual_error`), matching `backend/app/schemas.py`.
+(`recall_failure` / `logic_error` / `factual_error` / `cognitive_load` / `fluency_issue` /
+`off_topic` / `beyond`), matching `backend/app/schemas.py`.
+
+**Curriculum grounding.** When the caller sends `overall_topic`, `curriculum_context` (the class
+objective + teacher's notes + source material) and `key_concepts`, Space C grades against *that*
+instead of the judge's general knowledge. Only then can it separate three things a bare fact-check
+conflates: wrong (`factual_error`), off the syllabus (`off_topic`), and correct-but-past-the-syllabus
+(`beyond` — which comes back as `curriculum_update.added_concepts` so the backend can grow the class
+rather than penalise the learner).
+
+**Cross-modal fusion.** If the words are right but a large share of them cost visible effort to say
+(`FLUENCY_LOAD_RATIO_THRESHOLD`), that's a `fluency_issue` — recitation without understanding.
+Neither space sees it alone; it only exists in the disagreement between them.
+
+**The question is written here.** With the anomaly and the exact offending word still in hand, the
+judge writes the AI student's interruption and returns it as `student_question`. The backend relays
+it, and only falls back to its own LLM question generator when this is absent.
 
 ## Model budget — what changed and why
 
@@ -61,8 +77,23 @@ uvicorn server:app --host 0.0.0.0 --port 8100
 
 ## Call it
 
+`POST /analyze`, multipart. `audio` is required; everything else has a default.
+
+| Field | Default | Purpose |
+|---|---|---|
+| `audio` | — | one paused utterance, ≤ 15 MB (`.wav`/`.mp3`/`.m4a`/`.webm`/`.ogg`) |
+| `chunk_id` | `0` | aligns with the backend's segment spine |
+| `history` | `[]` | JSON array of prior transcripts — Space B context |
+| `enable_space_c` | server default | per-call fact-check override |
+| `overall_topic` | `""` | the topic being taught |
+| `curriculum_context` | `""` | class objective + teacher's notes + source material |
+| `key_concepts` | `[]` | JSON array of concepts already covered |
+
 ```bash
 curl -F audio=@utterance.wav -F chunk_id=4 -F 'history=["earlier transcript..."]' \
+     -F overall_topic='Computer Networks' \
+     -F curriculum_context='How a packet is forwarded hop by hop...' \
+     -F 'key_concepts=["routing table","hop"]' \
      http://localhost:8100/analyze
 ```
 ```json
@@ -70,23 +101,35 @@ curl -F audio=@utterance.wav -F chunk_id=4 -F 'history=["earlier transcript..."]
   "confidence": 0.38, "localized_target": "router",
   "anomalies": [ {"type": "recall_failure", "source": "space_a/audio-text", "score": 0.71,
                   "evidence": "hesitation on 'router'"} ],
-  "detail": [ {"word": "so", "hesitation_zscore": -0.4, "is_anomaly": false }, ... ] }
+  "detail": [ {"word": "so", "hesitation_zscore": -0.4, "is_anomaly": false }, ... ],
+  "student_question": { "question_text": "Wait, I thought the router was different? Can you clarify?",
+                        "target_concept": "router", "anomaly_type": "recall_failure" },
+  "curriculum_update": null }
 ```
+
+`503` until the models finish loading (minutes), `400` on empty audio, `413` over 15 MB. Requests
+are serialized behind a lock — the models are loaded once and aren't re-entrant.
 
 ## Backend integration
 
-`backend/app/confusion/engine.py` currently ships a text-only heuristic mock. When this service is
-up, point the backend at it (audio path) and keep the mock as the offline fallback — same
-`ChunkAnalysis` contract, so nothing downstream changes.
+`backend/app/confusion/engine.py` ships a text-only heuristic mock. When this service is up, point
+the backend at it with `ML_SERVICE_URL` and keep the mock as the offline fallback — same
+`ChunkAnalysis` contract, so nothing downstream changes. `backend/app/confusion/client.py` reports
+whether a given call actually reached this service, which is how the UI shows an honest "voice
+teaching unavailable" instead of a silently neutral score.
+
+The two services share no package, so `backend/tests/test_ml_service_contract.py` asserts
+`schemas.py` here against `app/schemas.py` there, field for field. It runs on a plain CPU checkout
+with no torch — that's why `server.py` imports `engine` lazily. Change one schema, change both.
 
 ## Files
 
 ```
 config.py           env knobs (models dir, whisper size, space_c/judge flags, thresholds)
-schemas.py          ChunkAnalysis / Anomaly (mirrors the backend contract)
+schemas.py          ChunkAnalysis / Anomaly / StudentQuestion (mirrors the backend contract)
 alignment.py        AlignmentEngine (the trainable brain)
-engine.py           ConfusionEngine — refactored analyze(): stateless, fp16, pluggable judge
-server.py           FastAPI: POST /analyze, GET /health
+engine.py           ConfusionEngine — stateless analyze(): fp16, pluggable judge, curriculum-grounded
+server.py           FastAPI: POST /analyze, GET /health (imports engine lazily — see the docstring)
 fetch_models.sh     resumable ModelScope model fetch (run once per fresh volume)
 start.sh            idempotent startup: restore deps/env, then serve on :8100
 ingest.py           slim Space-C vector DB builder
