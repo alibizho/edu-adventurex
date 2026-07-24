@@ -135,6 +135,14 @@ class QAEntry(BaseModel):
     answered_at: Optional[float] = None
 
 
+class ChunkQuestionResponse(BaseModel):
+    """Real-time per-chunk result: the confusion analysis of the just-spoken chunk plus a question
+    generated only when the chunk was confused (else `asked=False`, `question=None`)."""
+    asked: bool
+    analysis: ChunkAnalysis
+    question: Optional[TargetedQuestion] = None
+
+
 # ---- API I/O ----
 
 class IngestRequest(BaseModel):

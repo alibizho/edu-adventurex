@@ -31,13 +31,17 @@ async def generate_targeted_questions(
     chunks: list[ChunkAnalysis],
     history: list[QAEntry],
     start_id: int = 0,
+    topic: str | None = None,
 ) -> list[TargetedQuestion]:
     """Return one specialized, non-repeating question per low-confidence chunk. `start_id` is where
-    to begin numbering the returned questions (the store assigns the real ids on record)."""
+    to begin numbering the returned questions (the store assigns the real ids on record). `topic`
+    is the lesson topic the teacher declared; when given it grounds the questions in that topic."""
     if not chunks:
         return []
 
+    topic_line = f"LESSON TOPIC: {topic}\n\n" if topic else ""
     user = (
+        f"{topic_line}"
         f"LOW-CONFIDENCE CHUNKS:\n{_render_chunks(chunks)}\n\n"
         f"HISTORY (do NOT repeat any of these):\n{_render_history(history)}"
     )

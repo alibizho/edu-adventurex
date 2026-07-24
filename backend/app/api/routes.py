@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
+from ..config import settings
 from ..confusion import client, engine
 from ..fusion import fuse
 from ..pipeline.filter import filter_questions
@@ -13,6 +14,7 @@ from ..pipeline.scoring import score_ensemble
 from ..schemas import (
     AnswerRequest,
     ChunkAnalysis,
+    ChunkQuestionResponse,
     FusionResult,
     IngestRequest,
     NextQuestionsRequest,
@@ -94,6 +96,65 @@ async def confusion_analyze(
     )
     memory.append_analysis(session_id, analysis)
     return analysis
+
+
+@router.post("/questions/from_chunk", response_model=ChunkQuestionResponse)
+async def questions_from_chunk(
+    session_id: str = Form(...),
+    chunk_id: int = Form(0),
+    topic: str | None = Form(None),
+    history: str = Form("[]"),          # JSON array of prior transcripts (Space B context)
+    enable_space_c: bool | None = Form(False),   # Space C (fact-check) off by default — its
+                                                  # pedantic factual_errors false-positive on
+                                                  # correct speech; pass true to re-enable.
+    audio: UploadFile = File(...),
+) -> ChunkQuestionResponse:
+    """Real-time path: take one spoken chunk (the teacher paused), run it through the ml-service
+    confusion engine, and — ONLY if the chunk is confused — generate one targeted question about it.
+    "Confused" = confidence below `question_confidence_threshold` OR a lexical hesitation marker
+    (backstop for when Space A misses obvious hedging); ml-service anomalies are optional
+    (`question_gate_on_anomalies`, off by default — the on-box judges are noisy on short utterances).
+    Space C (fact-check) is off by default for this flow (its factual_errors false-positive on
+    correct speech). The AI students stay silent; the question is the output. Degrades to a neutral
+    analysis (`asked=False`) if the ml-service is unreachable."""
+    try:
+        hist = json.loads(history) if history else []
+        hist = [str(h) for h in hist] if isinstance(hist, list) else []
+    except json.JSONDecodeError:
+        hist = []
+    if not hist:
+        hist = [a.text for a in memory.get_analyses(session_id)] or [
+            s.text for s in memory.get_transcript(session_id)
+        ]
+
+    audio_bytes = await audio.read()
+    analysis = await client.analyze_audio(
+        audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
+        history=hist, enable_space_c=enable_space_c,
+    )
+    memory.append_analysis(session_id, analysis)
+
+    if topic:
+        memory.set_topic(session_id, topic)
+    topic = topic or memory.get_topic(session_id)
+
+    confused = (
+        (settings.question_gate_on_anomalies and bool(analysis.anomalies))
+        or analysis.confidence < settings.question_confidence_threshold
+        or engine.has_confusion_markers(analysis.text)
+    )
+    if not confused:
+        return ChunkQuestionResponse(asked=False, analysis=analysis, question=None)
+
+    questions = await generate_targeted_questions(
+        [analysis], memory.get_history(session_id),
+        start_id=memory.next_question_id(session_id), topic=topic or None,
+    )
+    memory.record_questions(session_id, questions)
+    return ChunkQuestionResponse(
+        asked=True, analysis=analysis,
+        question=questions[0] if questions else None,
+    )
 
 
 @router.post("/confusion/ingest")

@@ -53,8 +53,8 @@ Rules:
 - For each question provide an ANSWER KEY: the correct answer, grounded in the SOURCE ground
   truth. If the LESSON contradicts the SOURCE, the answer key MUST follow the SOURCE, not the
   lesson. If no SOURCE is given, use established correct knowledge of the topic.
-- Return ONLY a JSON array of 15-20 objects, each {"text": "...", "answer_key": "..."}.
-  No prose, no markdown fences, nothing else.
+- Return ONLY a JSON array of objects, each {"text": "...", "answer_key": "..."}.
+  The requested count is given in the prompt. No prose, no markdown fences, nothing else.
 
 Example item:
 {"text": "If the surface were ice instead, what happens to the box and why?",

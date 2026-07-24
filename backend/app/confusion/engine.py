@@ -21,6 +21,15 @@ _HEDGES = [
 ]
 _HEDGE_ANOMALY = {"type": "hedging", "source": "mock/lexical"}
 
+# Word-boundary hesitation pattern for has_confusion_markers (the real-time gate backstop). Built
+# from _HEDGES so common substrings don't fire ("er" in "router", "um" in "column"); "like" is
+# matched only as the discourse marker "like," to avoid the ordinary preposition.
+_HEDGE_TOKENS = [h for h in _HEDGES if h != "like,"]
+_HEDGE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(h) for h in _HEDGE_TOKENS) + r")\b" + r"|\blike\b\s*,",
+    re.IGNORECASE,
+)
+
 
 def _mock_confidence(text: str) -> tuple[float, list[Anomaly]]:
     low = text.lower()
@@ -60,3 +69,12 @@ def select_low_confidence(
         pool = [a for a in pool if a.confidence < threshold]
     pool.sort(key=lambda a: a.confidence)
     return pool[:k]
+
+
+def has_confusion_markers(text: str) -> bool:
+    """Lexical backstop for hesitation/uncertainty (e.g. 'um', 'uh', a trailing '?'). Used by the
+    real-time question gate when the ml-service's Space A alignment brain misses obvious hedging.
+    Word-boundary matched so 'er' in 'router' or 'um' in 'column' don't fire."""
+    if _HEDGE_RE.search(text):
+        return True
+    return text.strip().endswith("?")

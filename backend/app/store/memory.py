@@ -15,6 +15,8 @@ scores: dict[str, list[Score]] = {}
 chunk_analyses: dict[str, list[ChunkAnalysis]] = {}
 # session_id -> targeted-question ledger (asked questions + the user's answers)
 qa_ledger: dict[str, list[QAEntry]] = {}
+# session_id -> declared lesson topic (set once when the teacher starts a class)
+topics: dict[str, str] = {}
 
 
 def get_transcript(session_id: str) -> list[Segment]:
@@ -48,6 +50,14 @@ def get_analyses(session_id: str) -> list[ChunkAnalysis]:
 
 def get_history(session_id: str) -> list[QAEntry]:
     return qa_ledger.setdefault(session_id, [])
+
+
+def set_topic(session_id: str, topic: str) -> None:
+    topics[session_id] = topic
+
+
+def get_topic(session_id: str) -> str:
+    return topics.get(session_id, "")
 
 
 def next_question_id(session_id: str) -> int:

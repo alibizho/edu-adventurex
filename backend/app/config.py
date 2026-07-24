@@ -18,9 +18,26 @@ class Settings(BaseSettings):
     # Ensemble fan-out concurrency.
     max_concurrency: int = 40
 
-    # POC ensemble sizes (scale to 20 / 10 for the full run; §4.4).
-    n_taught: int = 8
-    n_cold: int = 4
+    # Ensemble sizes. 3 taught + 2 cold = 5 total (fast demo mode; the delta still has a
+    # 2-persona cold control). Scale up for a real measurement run.
+    n_taught: int = 3
+    n_cold: int = 2
+
+    # Real-time question gate: emit a question only when a chunk is confused — has an anomaly
+    # OR confidence below this threshold. Aligns with fusion.py DISTURBANCE_HIGH = 0.5.
+    question_confidence_threshold: float = 0.5
+
+    # Whether the real-time gate also fires on ml-service anomalies (logic_error/recall_failure).
+    # Default off: the on-box judges are noisy on short utterances (Space B flags non-contradictions,
+    # Space A misses hedging), so firing on anomalies yields false positives. Flip on once the
+    # ml-service is retuned. Space C factual_errors are suppressed via enable_space_c=False.
+    question_gate_on_anomalies: bool = False
+
+    # /measure cost knobs. The cold-student filter (not the scoring ensemble) dominates /measure
+    # time, so these are the real speed levers. filter_cold_samples = cold samples per candidate
+    # question; n_candidate_questions = how many the generator writes.
+    filter_cold_samples: int = 2
+    n_candidate_questions: int = 8
 
     # Grader verifier model; falls back to generator_model when empty.
     verifier_model: str = ""

@@ -1,6 +1,7 @@
 """Transfer-question generation from a transcript (report §4.2), each with a ground-truth key."""
 import re
 
+from ..config import settings
 from ..llm import generator_chat
 from ..schemas import Question, QuestionKind, Segment
 from .parsing import extract_json_array
@@ -17,12 +18,13 @@ def _parse_numbered_list(text: str) -> list[str]:
 
 
 async def generate_questions(transcript: list[Segment], source: str = "") -> list[Question]:
-    """Return 15-20 candidate transfer questions, each with an answer key grounded in `source`
-    (ground truth). Filtering happens in pipeline/filter.py."""
+    """Return candidate transfer questions (settings.n_candidate_questions of them), each with an
+    answer key grounded in `source` (ground truth). Filtering happens in pipeline/filter.py."""
     lesson = "\n".join(f"[{s.id}] {s.text}" for s in transcript)
     user = f"LESSON:\n{lesson}"
     if source.strip():
         user += f"\n\nSOURCE (ground truth):\n{source}"
+    user += f"\n\nWrite about {settings.n_candidate_questions} questions."
     raw = await generator_chat(GENERATOR_SYSTEM, user, temperature=0.5)
 
     items = extract_json_array(raw)
