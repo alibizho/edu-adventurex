@@ -15,7 +15,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ts"]
+      # -d teachable: probe the real DB, not the default "ts" db (which doesn't exist and
+      # otherwise spams the logs with FATAL: database "ts" does not exist every interval).
+      test: ["CMD-SHELL", "pg_isready -U ts -d teachable"]
       interval: 5s
       timeout: 3s
       retries: 10
