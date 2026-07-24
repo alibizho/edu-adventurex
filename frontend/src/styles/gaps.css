@@ -1,0 +1,52 @@
+@layer pages {
+  .gaps-screen { min-height: 950px; padding-bottom: var(--footer-height); }
+  .gaps-main { width: min(1360px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 100px; }
+  .gaps-summary { display: flex; gap: 44px; margin: 30px 0 22px; font-size: 14px; }
+  .gaps-workspace { min-height: 610px; display: grid; grid-template-columns: 410px minmax(0, 1fr); }
+  .gaps-list { padding: 34px 24px; border-right: 3px solid var(--ink); }
+  .gaps-list h2 { margin: 0 0 28px; padding: 0 12px 14px; border-bottom: 3px solid var(--ink); font-size: 18px; }
+  .gap-selector {
+    width: 100%;
+    min-height: 76px;
+    margin-bottom: 20px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border: 3px solid var(--ink);
+    border-radius: 0;
+    background: var(--paper);
+    text-align: left;
+    font-size: 13px;
+  }
+  .gap-selector--medium { background-image: radial-gradient(circle, rgba(0, 0, 0, .32) .8px, transparent .9px); background-size: 4px 4px; }
+  .gap-selector.is-selected { background: var(--ink); color: var(--paper); }
+  .gap-selector:focus-visible { outline: 4px solid var(--ink); outline-offset: 4px; }
+  .gap-detail { padding: 38px 42px 30px; }
+  .gap-detail > h2 { margin: 0 0 26px; font-family: var(--font-display); font-size: 48px; letter-spacing: 3px; }
+  .gap-detail section { margin-bottom: 26px; }
+  .gap-detail h3 { margin: 0 0 14px; padding-bottom: 9px; border-bottom: 3px solid var(--ink); font-size: 15px; }
+  .gap-detail p { margin: 0; font-size: 13px; line-height: 1.65; }
+  .gap-detail blockquote { margin: 0; padding: 22px 26px; border: 3px solid var(--ink); font-size: 13px; line-height: 1.6; }
+  .gap-detail .dashboard-actions { margin-top: 30px; }
+  .gaps-empty { min-height: 520px; display: grid; place-content: center; justify-items: center; gap: 18px; padding: 40px; text-align: center; }
+  .gaps-empty strong { font-family: var(--font-display); font-size: 42px; letter-spacing: 2px; }
+  .gaps-empty p { margin: 0 0 12px; font-size: 13px; }
+}
+
+@layer responsive {
+  @media (max-width: 900px) {
+    .gaps-workspace { grid-template-columns: 330px minmax(0, 1fr); }
+  }
+
+  @media (max-width: 780px) {
+    .gaps-main { width: calc(100% - 28px); padding-top: 28px; }
+    .gaps-summary { align-items: flex-start; flex-direction: column; gap: 8px; font-size: 11px; }
+    .gaps-workspace { display: block; }
+    .gaps-list { border-right: 0; border-bottom: 3px solid var(--ink); }
+    .gap-detail { padding: 28px 20px; }
+    .gap-detail > h2 { font-size: 39px; }
+    .gaps-empty { min-height: 450px; padding: 28px 18px; }
+  }
+}
