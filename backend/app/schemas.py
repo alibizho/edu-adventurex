@@ -99,6 +99,26 @@ class ChunkAnalysis(BaseModel):
     detail: list[WordScore] = Field(default_factory=list)   # per-word Space-A detail (ml-service)
 
 
+# ---- fusion: confidence x competence (report §6) ----
+
+class SegmentFusion(BaseModel):
+    """One segment crossed by both instruments."""
+    segment_id: int
+    text: str
+    disturbance: float                      # 1 - confidence, from the confusion engine [0,1]
+    transfer_delta: Optional[float] = None  # mean delta over questions citing this segment; None if none
+    quadrant: str                           # blind_spot | aware_gap | productive_struggle | mastery | unknown
+
+
+class FusionResult(BaseModel):
+    session_id: str
+    per_segment: list[SegmentFusion]
+    quadrant_counts: dict[str, int]
+    # Pearson(disturbance, -delta) across segments. Positive == well-calibrated: the kid sounded
+    # unsure exactly where the teaching failed to transmit (report §6.2). None if too few points.
+    calibration_rho: Optional[float] = None
+
+
 # ---- targeted-question agent + memory ----
 
 class TargetedQuestion(BaseModel):

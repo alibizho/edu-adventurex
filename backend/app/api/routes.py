@@ -7,11 +7,13 @@ from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
 from ..confusion import client, engine
+from ..fusion import fuse
 from ..pipeline.filter import filter_questions
 from ..pipeline.scoring import score_ensemble
 from ..schemas import (
     AnswerRequest,
     ChunkAnalysis,
+    FusionResult,
     IngestRequest,
     NextQuestionsRequest,
     QAEntry,
@@ -111,6 +113,22 @@ async def confusion_mock(session_id: str) -> dict:
     analyses = engine.analyze([s.text for s in transcript])
     memory.set_analyses(session_id, analyses)
     return {"session_id": session_id, "n_chunks": len(analyses)}
+
+
+# ---- fusion: confidence x competence (report §6) ----
+
+@router.get("/fusion/{session_id}", response_model=FusionResult)
+async def fusion_view(session_id: str) -> FusionResult:
+    """Cross the stored confusion analyses (disturbance) with the transfer-delta run (competence)
+    into the per-segment quadrant map + calibration. Run /confusion/analyze (or /mock) and /measure
+    first; either alone still returns partial results (segments it can't cross are 'unknown')."""
+    analyses = memory.get_analyses(session_id)
+    run = memory.runs.get(session_id)
+    scores = memory.scores.get(session_id, [])
+    if not analyses and run is None:
+        raise HTTPException(404, f"no analyses or measurement run for session {session_id!r}")
+    per_question = run.per_question if run else []
+    return fuse(session_id, analyses, scores, per_question)
 
 
 @router.post("/questions/next", response_model=list[TargetedQuestion])
