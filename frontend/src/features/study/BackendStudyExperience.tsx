@@ -19,7 +19,7 @@ import { Classroom } from "./components/Classroom";
 import { MarkdownNotes } from "./components/MarkdownNotes";
 import { ModuleBanner } from "./components/ModuleBanner";
 import { SessionExitScene } from "./components/SessionExitScene";
-import { useContinuousRecorder, type SpeechProsody } from "./useContinuousRecorder";
+import { usePressToTalkRecorder, type SpeechProsody } from "./usePressToTalkRecorder";
 import type { StudyModule } from "./study.types";
 
 const TOOLS = [
@@ -80,6 +80,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const [queueDepth, setQueueDepth] = useState(0);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,6 +96,11 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const chunkIdRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   transcriptRef.current = transcript;
+
+  // Bumped by every reset. A teaching turn that was already in flight when the class was thrown
+  // away compares this before touching state, so its answer can't land in the fresh session and
+  // put back a sentence the learner just deleted.
+  const generationRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -177,10 +183,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       while (queueRef.current.length > 0) {
         const { audio, prosody } = queueRef.current.shift()!;
         setQueueDepth(queueRef.current.length);
+        const generation = generationRef.current;
         try {
           const response = await backendLearningDataSource.teachAudio(
             pathId, classId, audio, chunkIdRef.current, transcriptRef.current.slice(-6), true, prosody,
           );
+          if (generationRef.current !== generation) continue;   // the class was reset under us
           chunkIdRef.current += 1;
           if (response.degraded || !response.analysis.text.trim()) {
             setVoiceAvailable(false);
@@ -198,7 +206,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
           // empty for a minute, and the checklist would sit still through all of it.
           void refreshProgress();
         } catch (caught) {
-          setError(apiMessage(caught));
+          if (generationRef.current === generation) setError(apiMessage(caught));
         }
       }
     } finally {
@@ -232,14 +240,14 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     void drain();
   }, [drain]);
 
-  const recorder = useContinuousRecorder({ onUtterance: handleUtterance });
-  const { disarm } = recorder;
+  const recorder = usePressToTalkRecorder({ onUtterance: handleUtterance });
+  const { cancel: cancelRecording } = recorder;
 
   // The mic belongs to the room. Entering a one-to-one conversation hands it to that view, and
   // leaving the class entirely must not leave the browser recording indicator on.
   useEffect(() => {
-    if (phase !== "classroom") disarm();
-  }, [phase, disarm]);
+    if (phase !== "classroom") cancelRecording();
+  }, [phase, cancelRecording]);
 
   const zoomHand = hands.find((hand) => hand.seatId === zoomSeat) ?? null;
 
@@ -328,9 +336,44 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     }
   }
 
+  /**
+   * Throw this class's session away and teach it again from nothing.
+   *
+   * For the lesson that went off the rails under its own power — a wrong tangent, a wrong topic,
+   * ten minutes of thinking out loud. Without this the only exits were finishing a class the
+   * learner knew was bad (and having it graded and folded into cross-class memory) or abandoning
+   * it half-taught, and both leave the AI students holding questions about speech nobody stands
+   * behind. Scoped to this class: the rest of the course is untouched.
+   */
+  async function resetClass() {
+    if (isResetting) return;
+    setIsResetting(true);
+    // Everything still queued or still being recorded belongs to the lesson being deleted.
+    generationRef.current += 1;
+    queueRef.current = [];
+    cancelRecording();
+    try {
+      const memory = await backendLearningDataSource.resetClass(pathId, classId);
+      setProgress(memory.class_progress[classId] ?? null);
+      setTranscript([]);
+      setHands([]);
+      setZoomSeat(null);
+      setLastHeard(null);
+      setLastConfidence(null);
+      setTurnCount(0);
+      setQueueDepth(0);
+      chunkIdRef.current = 0;
+      setError(null);
+    } catch (caught) {
+      setError(apiMessage(caught));
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
   async function finish(completionMode: SessionCompletionMode) {
     if (isBusy) return false;
-    disarm();
+    cancelRecording();
     setIsBusy(true);
     setError(null);
     try {
@@ -351,11 +394,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const handleExitComplete = useCallback(() => {
     navigate(`${ROUTES.summary}?path=${encodeURIComponent(pathId)}&class=${encodeURIComponent(classId)}`, { replace: true });
   }, [classId, navigate, pathId]);
-
-  function toggleMic() {
-    if (recorder.isArmed) recorder.disarm();
-    else void recorder.arm();
-  }
 
   if (isLoading) return <div className="screen study-screen"><AppHeader /><div className="backend-page-state retro-panel">GENERATING LEARNING MATERIAL...</div></div>;
   if (!path || !unit || !visualModule) return (
@@ -381,15 +419,19 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
             raisedHands: hands.map((hand) => hand.seatId),
             recorderState: recorder.state,
             meterRef: recorder.meterRef,
+            elapsedSeconds: recorder.elapsedSeconds,
             queueDepth,
             isBusy,
+            isResetting,
             lastHeard,
             turnCount,
             error: error ?? recorder.error,
             voiceAvailable,
             lastConfidence,
-            onToggleMic: toggleMic,
+            onToggleMic: recorder.toggle,
+            onDiscardRecording: cancelRecording,
             onTextAnswer: (text) => void teachText(text),
+            onReset: () => void resetClass(),
             onFinish: () => void finish("self-teaching"),
           }}
         />

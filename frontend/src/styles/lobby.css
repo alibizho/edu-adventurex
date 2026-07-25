@@ -765,7 +765,7 @@
   }
 
   .mic-meter-fill {
-    /* The recorder writes this width imperatively (see useContinuousRecorder's meterRef), so the
+    /* The recorder writes this width imperatively (see usePressToTalkRecorder's meterRef), so the
        resting state has to be declared here rather than inherited from a React style prop. */
     width: 0;
     height: 100%;
@@ -786,6 +786,39 @@
     justify-self: center;
     margin: 16px auto 0;
     display: block;
+  }
+
+  /* The two ways out of a class, side by side: start it over, or finish it. */
+  .classroom-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(10px, 1.6vw, 20px);
+    margin-top: 16px;
+  }
+
+  /* Inside the row the finish button is one item among several; its own auto margins would shove
+     the rest of the row off-centre. */
+  .classroom-actions .classroom-finish {
+    margin: 0;
+  }
+
+  .classroom-reset {
+    min-height: 48px;
+    padding: 8px 20px;
+    font-size: clamp(12px, 1.2vw, 15px);
+  }
+
+  /* Armed. The next press throws the lesson away, so it stops looking like the quiet option. */
+  .classroom-reset.is-confirming {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .classroom-reset:disabled {
+    opacity: .5;
+    cursor: not-allowed;
   }
 
   /* Covered every objective — the button says so and earns some weight, but is never the only

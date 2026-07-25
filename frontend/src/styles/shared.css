@@ -83,6 +83,16 @@
     color: var(--paper);
   }
 
+  /* "Throw this take away" — offered next to the mic in both rooms while a recording is open, so
+     a fumbled sentence costs one press instead of going into the transcript for good. Small on
+     purpose: sending what you just said is the main action, not this. */
+  .discard-take {
+    min-height: 40px;
+    padding: 6px 16px;
+    box-shadow: none;
+    font-size: 14px;
+  }
+
   .status-bar {
     position: absolute;
     z-index: 30;

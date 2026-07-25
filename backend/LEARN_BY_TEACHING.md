@@ -327,16 +327,16 @@ response explicitly sets `degraded: true` and does not fabricate a transcript or
 
 ### `silent` — the live classroom
 
-`silent=true` is how the frontend teaches continuously. The learner talks without stopping and every
-natural pause ships a chunk, so the utterance is still transcribed, stored as a segment and analyzed
-— but the class only speaks when a question actually fires:
+`silent=true` is how the frontend teaches. The learner presses the mic, teaches, and presses again
+to ship the chunk (the mic is never live on its own), so the utterance is still transcribed, stored
+as a segment and analyzed — but the class only speaks when a question actually fires:
 
 | | question fired | no question |
 |---|---|---|
 | `silent=false` (default) | `student_reply` = the question | `student_reply` = an LLM reply |
 | `silent=true` | `student_reply` = the question | `student_reply = ""`, **no LLM call** |
 
-Without it every pause costs a reply round-trip and the class ends up several sentences behind the
+Without it every chunk costs a reply round-trip and the class ends up several sentences behind the
 teacher. The transcript is identical either way, so the end-of-class `/analysis/{session_id}`
 measurement is unaffected — which is exactly why the segment is recorded even when nobody speaks.
 
@@ -367,6 +367,29 @@ count as *understood*, unanswered probes as *struggled*.
   ]
 }
 ```
+
+---
+
+## `POST /plan/{path_id}/class/{class_id}/reset` — "Start this class over"
+
+The inverse of ⑥, for the lesson that went off the rails: a tangent that ate the class, the wrong
+topic, ten minutes of thinking out loud. Without it the only exits were finishing a class the
+learner knows is bad — which grades it and folds it into memory — or abandoning it half-taught.
+
+Erases the class's store session (transcript, analyses, question ledger, any analysis job) and
+replaces its `ClassProgressRecord` with a fresh one, then takes back what the class contributed to
+cross-class memory: its title leaves `covered_concepts`, and the questions it asked (read off the
+ledger before it is cleared) plus its objective texts leave `asked_questions`, `understood` and
+`struggled`. `expanded_concepts` stays — those are beyond-scope concepts the learner genuinely
+raised and nothing records which class raised them.
+
+The plan and the teacher's notes are untouched: the learner gets the same class back, not a new one.
+
+`ClassProgressRecord.reset_count` increments on every reset. It is not a statistic — a teaching turn
+or background coverage check that was mid-flight when the class was thrown away compares it against
+the value it read and drops its write, so a deleted lesson cannot write itself back.
+
+**Request:** none (path params only). **Response:** the updated `PathMemory`.
 
 ---
 

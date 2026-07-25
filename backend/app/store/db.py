@@ -140,6 +140,15 @@ class DbStore:
     async def dispose(self) -> None:
         await self._engine.dispose()
 
+    async def clear_session(self, session_id: str) -> None:
+        """Drop the sessions row — segments, analyses, runs and qa_entries all hang off it with
+        ON DELETE CASCADE and go with it. analysis_jobs is keyed by session_id but not a foreign
+        key, so it is deleted by hand."""
+        async with self._sessionmaker() as s:
+            await s.execute(delete(AnalysisJobRow).where(AnalysisJobRow.session_id == session_id))
+            await s.execute(delete(SessionRow).where(SessionRow.session_id == session_id))
+            await s.commit()
+
     async def _ensure_session(self, s: AsyncSession, session_id: str) -> None:
         """Insert a sessions row if absent (FK target for everything else). Race-safe upsert."""
         await s.execute(

@@ -45,6 +45,11 @@ class MemoryStore:
     async def dispose(self) -> None:
         pass
 
+    async def clear_session(self, session_id: str) -> None:
+        for bucket in (_transcripts, _runs, _scores, _chunk_analyses, _qa_ledger, _topics,
+                       _analysis_jobs):
+            bucket.pop(session_id, None)
+
     # ---- transcript ----
 
     async def get_transcript(self, session_id: str) -> list[Segment]:

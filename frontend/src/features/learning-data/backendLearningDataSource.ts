@@ -12,7 +12,7 @@ import type {
   SessionSnapshot,
   TopicScope,
 } from "./backend.types";
-import type { SpeechProsody } from "../study/useContinuousRecorder";
+import type { SpeechProsody } from "../study/usePressToTalkRecorder";
 
 function segment(value: string) {
   return encodeURIComponent(value);
@@ -124,7 +124,7 @@ export const backendLearningDataSource = {
       form.append("answering_question_id", String(answeringQuestionId));
     }
     // How it sounded. The GPU can't see hesitation that runs through a whole utterance, so the
-    // recorder measures pauses and dead air directly (see useContinuousRecorder.ts).
+    // recorder measures pauses and dead air directly (see usePressToTalkRecorder.ts).
     if (prosody) {
       Object.entries(prosody).forEach(([key, value]) => form.append(key, String(value)));
     }
@@ -142,6 +142,15 @@ export const backendLearningDataSource = {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, question_id: questionId, answer }),
     }, 30_000);
+  },
+
+  /** Wipe this class's session (speech, analyses, questions, progress) and hand back the memory. */
+  resetClass(pathId: string, classId: string) {
+    return apiRequest<PathMemory>(
+      `/plan/${segment(pathId)}/class/${segment(classId)}/reset`,
+      { method: "POST" },
+      30_000,
+    );
   },
 
   endClass(pathId: string, classId: string, completionMode: "self-teaching" | "guided-explanation") {

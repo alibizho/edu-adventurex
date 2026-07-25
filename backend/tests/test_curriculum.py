@@ -16,6 +16,7 @@ from app.curriculum import teaching  # noqa: E402
 from app.schemas import (  # noqa: E402
     ClassUnit,
     GrowthPath,
+    PathMemory,
     Segment,
     TargetedQuestion,
     TeachTurnResponse,
@@ -161,6 +162,50 @@ def test_end_class_folds_memory():
     assert "Waves" in mem.covered_concepts
     assert "Q-answered" in mem.understood      # answered -> understood
     assert "Q-unanswered" in mem.struggled     # unanswered -> still struggled
+
+
+def test_reset_class_erases_the_session_and_takes_back_its_memory():
+    c1 = ClassUnit(
+        class_id="c1", title="Waves", objective="Understand waves.",
+        teacher_notes="- Waves carry energy, not matter.",
+    )
+    run(store.save_path(_path("gp-reset", c1, topic="Physics")))
+    sid = teaching.class_session_id("gp-reset", "c1")
+    run(store.append_segment(sid, Segment(id=0, idx=0, text="a wave is, uh, a thing that waves")))
+    run(store.record_questions(sid, [TargetedQuestion(id=0, chunk_id=0, text="Q-asked")]))
+    run(store.record_answer(sid, 0, "an answer"))
+    run(teaching.end_class("gp-reset", "c1", c1))
+
+    memory = run(teaching.reset_class("gp-reset", "c1", c1))
+
+    # The session is gone: nothing for the next attempt to be judged against.
+    assert run(store.get_transcript(sid)) == []
+    assert run(store.get_history(sid)) == []
+    # ...and so is what the class taught the rest of the path.
+    assert "Waves" not in memory.covered_concepts
+    assert "Q-asked" not in memory.understood
+    assert memory.asked_questions == []
+    progress = memory.class_progress["c1"]
+    assert progress.status == "not_started" and progress.turn_count == 0
+    assert progress.reset_count == 1, "in-flight writers compare this before resurrecting a class"
+
+
+def test_teaching_turn_in_flight_during_a_reset_is_dropped():
+    """_save_memory re-reads under the lock; a turn that started before the reset must not write."""
+    c1 = ClassUnit(class_id="c1", title="Optics", objective="Understand optics.")
+    run(store.save_path(_path("gp-inflight", c1, topic="Physics")))
+    # A deep copy on purpose: the memory store hands out its live object, while a real teaching
+    # turn holds a snapshot it deserialized before the reset. Aliasing would hide the bug.
+    stale = PathMemory.model_validate(run(store.get_memory("gp-inflight")).model_dump())
+    teaching._advance_progress(stale, "c1", c1)      # the turn's snapshot, pre-reset
+    stale.asked_questions.append("Q-from-the-deleted-lesson")
+
+    run(teaching.reset_class("gp-inflight", "c1", c1))
+    run(teaching._save_memory("gp-inflight", "c1", c1, stale))
+
+    after = run(store.get_memory("gp-inflight"))
+    assert after.class_progress["c1"].turn_count == 0
+    assert after.asked_questions == []
 
 
 def test_end_class_is_idempotent():

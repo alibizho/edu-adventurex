@@ -39,3 +39,9 @@ data/*
 *.zip
 /1.json
 qa-*.png
+
+# Screenshots and design references dropped in the repo root while working on the UI. Real
+# assets live under frontend/public/, so nothing at the top level is ever worth committing.
+/*.png
+/*.jpg
+/*.jpeg

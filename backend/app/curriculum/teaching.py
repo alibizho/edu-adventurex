@@ -344,6 +344,10 @@ async def _save_memory(
     async with _memory_locks[path_id]:
         stored = (await store.get_memory(path_id)).class_progress.get(class_id)
         progress = memory.class_progress.get(class_id)
+        # The class was thrown away while this turn was talking to the model. Everything in
+        # `memory` describes a lesson that no longer exists — write none of it.
+        if stored is not None and progress is not None and stored.reset_count != progress.reset_count:
+            return
         if stored is not None and progress is not None:
             for objective_id in stored.covered_objectives:
                 if objective_id not in progress.covered_objectives:
@@ -752,6 +756,45 @@ async def end_class(
     return memory
 
 
+async def reset_class(path_id: str, class_id: str, cls: ClassUnit) -> PathMemory:
+    """'Start this class over': erase everything this class recorded, and undo what it taught the
+    rest of the path.
+
+    For the lesson that went wrong under its own steam — a tangent that became the whole class,
+    the wrong topic, ten minutes of thinking out loud. Ending such a class folds it into
+    cross-class memory and later classes then quietly skip what it "covered"; abandoning it leaves
+    the same debris. The learner needs a way to say "that wasn't it" and get the class they were
+    given back.
+
+    Scoped to this class. The session (speech, analyses, question ledger) goes entirely, and the
+    concepts and questions it contributed to path memory are removed by name — the QA ledger is
+    read before it is cleared precisely so they can be identified. `expanded_concepts` is left
+    alone: those are beyond-scope concepts the learner genuinely raised, and nothing records which
+    class raised them.
+    """
+    session_id = class_session_id(path_id, class_id)
+    async with _memory_locks[path_id]:
+        history = await store.get_history(session_id)
+        # Everything path memory could be holding on this class's behalf: the questions it asked
+        # and the goals it was judged against.
+        own = {e.question.text for e in history} | {o.text for o in cls.checklist()}
+        memory = await store.get_memory(path_id)
+        previous = memory.class_progress.get(class_id)
+        # A fresh record rather than a deleted key: `reset_count` is what an in-flight teaching
+        # turn compares itself against before writing (see _save_memory), and a missing record
+        # looks exactly like a class nobody has taught yet.
+        memory.class_progress[class_id] = ClassProgressRecord(
+            reset_count=(previous.reset_count + 1) if previous else 1
+        )
+        memory.asked_questions = [q for q in memory.asked_questions if q not in own]
+        memory.understood = [c for c in memory.understood if c not in own]
+        memory.struggled = [c for c in memory.struggled if c not in own]
+        memory.covered_concepts = [c for c in memory.covered_concepts if c != cls.title]
+        await store.update_memory(path_id, memory)
+        await store.clear_session(session_id)
+    return memory
+
+
 # ---- objective mastery (background) ----
 
 # How much speech the judge sees. Wider than the unjudged tail on purpose: an objective explained
@@ -777,6 +820,7 @@ async def run_objective_check(path_id: str, class_id: str, cls: ClassUnit) -> No
 
         memory = await store.get_memory(path_id)
         progress = memory.class_progress.get(class_id) or ClassProgressRecord()
+        judged_reset_count = progress.reset_count
         # `fresh` is only the gate — "has anything been said since the last check". What the judge
         # actually reads is the window below.
         fresh = [s for s in transcript if s.id > progress.last_checked_segment]
@@ -798,6 +842,11 @@ async def run_objective_check(path_id: str, class_id: str, cls: ClassUnit) -> No
         async with _memory_locks[path_id]:
             memory = await store.get_memory(path_id)
             progress = memory.class_progress.get(class_id) or ClassProgressRecord()
+            # The learner started the class over while the judge was reading. The speech these
+            # checkmarks were earned on has been deleted; awarding them now would tick goals off
+            # a class that has not been taught yet.
+            if progress.reset_count != judged_reset_count:
+                return
             for objective_id, evidence in covered.items():
                 if objective_id not in progress.covered_objectives:
                     progress.covered_objectives.append(objective_id)

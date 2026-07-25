@@ -3,7 +3,7 @@ import { PixelMicIcon, PixelReturnIcon } from "../../../components/visuals/Pixel
 import { PixelRobot } from "../../../components/visuals/PixelRobot";
 import type { ClassObjective } from "../../learning-data/backend.types";
 import { SEATS, type SeatId } from "../classroom.seats";
-import type { MeterRef, RecorderState } from "../useContinuousRecorder";
+import { formatElapsed, type MeterRef, type RecorderState } from "../usePressToTalkRecorder";
 import type { StudyModule } from "../study.types";
 import { ObjectiveChecklist } from "./ObjectiveChecklist";
 
@@ -23,8 +23,11 @@ type LiveSession = {
   recorderState: RecorderState;
   /** Bound straight to the meter's DOM node; the recorder animates it without re-rendering us. */
   meterRef: MeterRef;
+  /** How long the open recording has been running. The teacher's only clock. */
+  elapsedSeconds: number;
   queueDepth: number;
   isBusy: boolean;
+  isResetting: boolean;
   lastHeard: string | null;
   turnCount: number;
   error: string | null;
@@ -33,7 +36,11 @@ type LiveSession = {
   /** Confidence of the last analyzed chunk, [0,1]. null before the first one lands. */
   lastConfidence: number | null;
   onToggleMic: () => void;
+  /** Drop the open recording unsent — the fumbled take that isn't worth teaching. */
+  onDiscardRecording: () => void;
   onTextAnswer: (text: string) => void;
+  /** Throw this class's session away and start it again from nothing. */
+  onReset: () => void;
   onFinish: () => void;
 };
 
@@ -147,8 +154,8 @@ function TutorialContent({ disabled, onCollapse }: { disabled: boolean; onCollap
         <div className="tutorial-heading-row">
           <div className="tutorial-bot"><PixelRobot /></div>
           <div>
-            <h3>JUST START TALKING</h3>
-            <p>HIT THE MIC AND TEACH.<br />WHEN A STUDENT GETS LOST<br />A ? POPS UP — CLICK IT</p>
+            <h3>PRESS THE MIC AND TEACH</h3>
+            <p>PRESS AGAIN TO SEND IT.<br />WHEN A STUDENT GETS LOST<br />A ? POPS UP — CLICK IT</p>
           </div>
         </div>
         <div className="tutorial-ready"><PixelHandIcon /><span>WUT IS READY<br />TO LEARN!</span></div>
@@ -172,8 +179,8 @@ function TutorialContent({ disabled, onCollapse }: { disabled: boolean; onCollap
         <ul>
           <li>USE SIMPLE WORDS</li>
           <li>GIVE REAL EXAMPLES</li>
-          <li>PAUSE WHEN YOU FINISH A THOUGHT</li>
-          <li>TAKE YOUR TIME!</li>
+          <li>PRESS THE MIC AGAIN TO SEND</li>
+          <li>TAKE YOUR TIME — NOTHING IS SENT UNTIL YOU SAY SO</li>
         </ul>
       </section>
     </div>
@@ -239,12 +246,14 @@ function classStatus(
   return { text: "THE CLASS IS FOLLOWING", tone: "clear" };
 }
 
-function micCaption(state: RecorderState, isBusy: boolean, queueDepth: number) {
+function micCaption(state: RecorderState, isBusy: boolean, queueDepth: number, elapsedSeconds: number) {
+  // The recording outranks everything else on this line: while the mic is open, what the teacher
+  // needs to know is that it's open, for how long, and how to close it.
+  if (state === "recording") return `RECORDING ${formatElapsed(elapsedSeconds)} — PRESS AGAIN TO SEND`;
+  if (state === "starting") return "OPENING THE MIC...";
   if (queueDepth > 3) return `FALLING BEHIND — ${queueDepth} CLIPS QUEUED`;
-  if (state === "idle") return isBusy ? "THINKING..." : "CLICK TO START TEACHING";
-  if (state === "calibrating") return "LISTENING TO THE ROOM...";
-  if (state === "speaking") return "HEARING YOU — PAUSE WHEN DONE";
-  return isBusy ? "THINKING..." : "LISTENING — JUST TALK";
+  if (isBusy) return "THINKING...";
+  return "PRESS THE MIC AND TEACH — PRESS AGAIN WHEN YOU'RE DONE";
 }
 
 export function Classroom({
@@ -259,6 +268,9 @@ export function Classroom({
 }: ClassroomProps) {
   const [zoomingTo, setZoomingTo] = useState<SeatId | null>(null);
   const [isTutorialOpen, setIsTutorialOpen] = useState(true);
+  // Reset throws away everything the learner has taught in this class, so it asks first. An inline
+  // second press rather than a dialog: the room already speaks in buttons.
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
 
   // The zoom timer must survive parent re-renders. Keeping the callback in a ref instead of a dep
   // means the 520 ms is measured once per click — with the prop in deps, every re-render of the
@@ -353,15 +365,15 @@ export function Classroom({
           <div className="classroom-controls">
             <button
               type="button"
-              className={`voice-button${live.recorderState === "speaking" ? " is-listening" : ""}${isArmed ? " is-armed" : ""}`}
-              aria-label={isArmed ? "Stop teaching" : "Start teaching"}
+              className={`voice-button${live.recorderState === "recording" ? " is-listening" : ""}${isArmed ? " is-armed" : ""}`}
+              aria-label={live.recorderState === "recording" ? "Stop recording and send what you taught" : "Start recording"}
               aria-pressed={isArmed}
               onClick={live.onToggleMic}
             >
               <PixelMicIcon />
             </button>
             <div className="classroom-status">
-              <strong>{micCaption(live.recorderState, live.isBusy, live.queueDepth)}</strong>
+              <strong>{micCaption(live.recorderState, live.isBusy, live.queueDepth, live.elapsedSeconds)}</strong>
               {isArmed && (
                 <div className="mic-meter" aria-hidden="true">
                   <div className="mic-meter-fill" ref={live.meterRef} />
@@ -378,6 +390,11 @@ export function Classroom({
                 </div>
               )}
             </div>
+            {live.recorderState === "recording" && (
+              <button type="button" className="outline-action discard-take" onClick={live.onDiscardRecording}>
+                DISCARD
+              </button>
+            )}
           </div>
         ) : (
           <ClassroomTextInput isBusy={live.isBusy} onSend={live.onTextAnswer} />
@@ -406,16 +423,44 @@ export function Classroom({
 
       {/* Soft gate: finishing is always allowed. Covering everything changes what the button says
           and how loud it is, rather than being the only way out — a learner whose phrasing the
-          judge missed must never be trapped in a class they already understand. */}
+          judge missed must never be trapped in a class they already understand.
+
+          Beside it, the other honest way out: a lesson that wandered off the topic can be thrown
+          away and taught again, instead of being finished badly or carried by a transcript the
+          learner no longer stands behind. */}
       {live && live.turnCount > 0 && (
-        <button
-          type="button"
-          className={`classroom-finish solid-action${allCovered ? " is-mastered" : ""}`}
-          disabled={Boolean(zoomingTo)}
-          onClick={live.onFinish}
-        >
-          {allCovered ? "YOU'VE GOT IT — FINISH" : "FINISH TEACHING"}
-        </button>
+        <div className="classroom-actions">
+          <button
+            type="button"
+            className={`outline-action classroom-reset${isConfirmingReset ? " is-confirming" : ""}`}
+            disabled={Boolean(zoomingTo) || live.isResetting}
+            onClick={() => {
+              if (!isConfirmingReset) return setIsConfirmingReset(true);
+              setIsConfirmingReset(false);
+              live.onReset();
+            }}
+          >
+            {live.isResetting ? "STARTING OVER..."
+              : isConfirmingReset ? "YES — WIPE THIS CLASS"
+              : "START THIS CLASS OVER"}
+          </button>
+          {isConfirmingReset && !live.isResetting && (
+            <button type="button" className="outline-action classroom-reset" onClick={() => setIsConfirmingReset(false)}>
+              KEEP GOING
+            </button>
+          )}
+          {/* Not while the mic is open: the recording in progress would be dropped unsent, and
+              "finish" must never be how a teacher loses their last sentence. Reset stays live —
+              throwing the recording away is exactly what it is for. */}
+          <button
+            type="button"
+            className={`classroom-finish solid-action${allCovered ? " is-mastered" : ""}`}
+            disabled={Boolean(zoomingTo) || live.isResetting || live.recorderState === "recording"}
+            onClick={live.onFinish}
+          >
+            {allCovered ? "YOU'VE GOT IT — FINISH" : "FINISH TEACHING"}
+          </button>
+        </div>
       )}
 
       {live?.error && <p className="classroom-error" role="alert">{live.error}</p>}

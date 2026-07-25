@@ -236,6 +236,10 @@ class TopicScope(BaseModel):
 
 class ClassProgressRecord(BaseModel):
     status: Literal["not_started", "in_progress", "complete"] = "not_started"
+    # How many times the learner has thrown this class away and started it over. Not a statistic:
+    # a teaching turn or coverage check already in flight when that happened compares this against
+    # the value it read, and drops its write rather than resurrecting a deleted lesson.
+    reset_count: int = 0
     readiness: int = 0                  # % of this class's objectives actually covered
     turn_count: int = 0
     started_at: Optional[float] = None

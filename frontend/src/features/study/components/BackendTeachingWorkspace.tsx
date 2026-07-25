@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PixelMicIcon } from "../../../components/visuals/PixelIcons";
 import type { TargetedQuestion } from "../../learning-data/backend.types";
-import { useContinuousRecorder, type SpeechProsody } from "../useContinuousRecorder";
+import { formatElapsed, usePressToTalkRecorder, type SpeechProsody } from "../usePressToTalkRecorder";
 
 type TurnResult = { teacherText: string; studentText: string; isOver: boolean };
 
@@ -18,8 +18,9 @@ type BackendTeachingWorkspaceProps = {
 
 /**
  * One student, up close. You got here by clicking the `?` over their head, so there is exactly one
- * thing to do: answer what they asked. The mic is armed on arrival — this is a conversation, not a
- * form, and making the teacher hunt for a button breaks the momentum they had while teaching.
+ * thing to do: answer what they asked. The mic waits for you to press it — it used to open by
+ * itself on arrival, which meant walking into a conversation already being recorded, and a
+ * half-formed "uh, so..." was sent as the answer before the teacher had read the question.
  *
  * It really is a conversation: the backend grades each answer against the question's answer key, so
  * a vague one earns a follow-up on the same concept rather than being accepted. The exchange ends
@@ -66,7 +67,7 @@ export function BackendTeachingWorkspace({
     if (result.isOver) setIsOver(true);
   };
 
-  const recorder = useContinuousRecorder({
+  const recorder = usePressToTalkRecorder({
     onUtterance: (audio, prosody) => {
       if (isSendingRef.current) return;
       startSending();
@@ -74,12 +75,7 @@ export function BackendTeachingWorkspace({
     },
   });
 
-  const { arm, disarm } = recorder;
-  useEffect(() => {
-    if (!voiceAvailable) return;
-    void arm();
-    return disarm;
-  }, [arm, disarm, voiceAvailable]);
+  const { cancel, toggle } = recorder;
 
   function sendText() {
     const trimmed = draft.trim();
@@ -89,9 +85,9 @@ export function BackendTeachingWorkspace({
     void onTextAnswer(trimmed).then(recordTurn).finally(finishSending);
   }
 
-  // Stop listening only once the student is actually satisfied. Disarming after every reply is what
-  // made this a one-shot form: a follow-up would arrive with no way left to answer it.
-  useEffect(() => { if (isOver) disarm(); }, [isOver, disarm]);
+  // Nothing left to answer: drop the mic if it happens to be open rather than record over the end
+  // of the conversation. Anything already captured is discarded — the student has stopped listening.
+  useEffect(() => { if (isOver) cancel(); }, [isOver, cancel]);
 
   const busy = isBusy || isSending;
   // What the student is saying right now: their newest line, or the question that got you here.
@@ -143,29 +139,32 @@ export function BackendTeachingWorkspace({
         </div>
       ) : (
         <div className="voice-control">
-          {/* A real button, not decoration. It used to be an aria-hidden <div> with no handler, so
-              a teacher who wanted to stop talking — or restart after the mic dropped — had nothing
-              to press and no way to tell the room was still listening. */}
+          {/* The whole control: press once to record your answer, press again to send it. */}
           <button
             type="button"
-            className={`voice-button${recorder.state === "speaking" ? " is-listening" : ""}${recorder.isArmed ? " is-armed" : ""}`}
-            aria-label={recorder.isArmed ? "Stop answering" : "Start answering"}
+            className={`voice-button${recorder.isRecording ? " is-listening" : ""}${recorder.isArmed ? " is-armed" : ""}`}
+            aria-label={recorder.isRecording ? "Stop recording and send your answer" : "Record your answer"}
             aria-pressed={recorder.isArmed}
-            onClick={() => (recorder.isArmed ? disarm() : void arm())}
+            disabled={busy}
+            onClick={toggle}
           >
             <PixelMicIcon />
           </button>
           <strong>
             {busy ? "THINKING..."
-              : !recorder.isArmed ? "CLICK THE MIC TO ANSWER"
-              : recorder.state === "calibrating" ? "LISTENING TO THE ROOM..."
-              : recorder.state === "speaking" ? "HEARING YOU — PAUSE WHEN DONE"
-              : "ANSWER OUT LOUD"}
+              : recorder.state === "starting" ? "OPENING THE MIC..."
+              : recorder.isRecording ? `RECORDING ${formatElapsed(recorder.elapsedSeconds)} — PRESS AGAIN TO SEND`
+              : "PRESS THE MIC TO ANSWER"}
           </strong>
           {recorder.isArmed && (
             <div className="mic-meter" aria-hidden="true">
               <div className="mic-meter-fill" ref={recorder.meterRef} />
             </div>
+          )}
+          {recorder.isRecording && (
+            <button type="button" className="outline-action discard-take" onClick={cancel}>
+              DISCARD
+            </button>
           )}
           {question.anomaly_type && <span>DETECTED: {question.anomaly_type.replaceAll("_", " ").toUpperCase()}</span>}
         </div>

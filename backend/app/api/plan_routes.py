@@ -10,6 +10,7 @@
                                                already written by /plan/build
     POST /plan/{path_id}/class/{cid}/teach/turn teach a turn; a question fires only when unconfident
     POST /plan/{path_id}/class/{cid}/teach/audio-turn  same, from recorded speech via the ml-service
+    POST /plan/{path_id}/class/{cid}/reset      "Start this class over"; erases the class's session
     POST /plan/{path_id}/class/{cid}/end        "End class"; folds the class into cross-class memory
 
 Thin — the LLM work lives in app/curriculum/, memory + reuse of the confusion/targeted pipeline in
@@ -35,6 +36,7 @@ from ..curriculum.teaching import (
     class_audio_turn,
     class_teach_turn,
     end_class,
+    reset_class,
     run_objective_check,
 )
 from ..schemas import (
@@ -245,6 +247,16 @@ async def class_teach_audio(
     if not result.degraded:
         background_tasks.add_task(run_objective_check, path_id, class_id, cls)
     return result
+
+
+@router.post("/{path_id}/class/{class_id}/reset", response_model=PathMemory)
+async def class_reset(path_id: str, class_id: str) -> PathMemory:
+    """'Start this class over': erase the class's session and its progress, and take back what it
+    contributed to cross-class memory. The plan and its teacher's notes are untouched — the
+    learner gets the same class again, not a new one."""
+    path = await _load_path(path_id)
+    cls = _find_class(path, class_id)
+    return await reset_class(path_id, class_id, cls)
 
 
 @router.post("/{path_id}/class/{class_id}/end", response_model=PathMemory)
