@@ -1,0 +1,477 @@
+@layer pages {
+  .study-screen--conversation {
+    min-height: 100vh;
+    padding-bottom: 0;
+    background: #f4f4f4;
+  }
+
+  .study-screen--conversation .study-layout {
+    min-height: calc(100vh - var(--header-height));
+  }
+
+  .study-screen--conversation .student-sidebar {
+    position: relative;
+    z-index: 3;
+    background: #f4f4f4;
+  }
+
+  .student-avatar--student {
+    padding: 0;
+    overflow: hidden;
+    background: #f4f4f4;
+  }
+
+  .student-avatar--student img {
+    width: 100%;
+    height: 160%;
+    display: block;
+    object-fit: cover;
+    object-position: 50% 4%;
+    image-rendering: pixelated;
+  }
+
+  .conversation-canvas {
+    min-width: 0;
+    background: #f4f4f4;
+  }
+
+  .conversation-stage {
+    position: relative;
+    min-height: calc(100vh - var(--header-height));
+    overflow: hidden;
+    background: #f4f4f4;
+  }
+
+  .conversation-character {
+    position: absolute;
+    left: 5.2%;
+    bottom: 62px;
+    width: min(32vw, 480px);
+    height: min(calc(100% - 118px), 1155px);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .conversation-character img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+    object-position: center bottom;
+    image-rendering: pixelated;
+  }
+
+  .conversation-character-sprite {
+    position: relative;
+    height: 100%;
+    max-width: 100%;
+    aspect-ratio: 349 / 1059;
+    background-image: url("/images/wut-student-book-opening.png");
+    background-repeat: no-repeat;
+    background-position: 0 0;
+    background-size: 800% 100%;
+    image-rendering: pixelated;
+  }
+
+  .conversation-character-sprite.is-opening-book {
+    animation:
+      wut-open-book 1120ms steps(7, end) forwards,
+      wut-open-book-settle 1120ms steps(5, end) both;
+  }
+
+  .conversation-character-sprite.is-holding-book {
+    background-position: 100% 0;
+  }
+
+  .student-speech {
+    position: absolute;
+    top: 10.5%;
+    left: 36%;
+    width: min(48vw, 690px);
+    min-height: 170px;
+    padding: 48px 42px 34px;
+    border: 5px solid var(--ink);
+    box-shadow: 10px 10px 0 var(--ink);
+    background: var(--paper);
+  }
+
+  .student-speech::before {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    left: 60px;
+    bottom: -38px;
+    width: 0;
+    height: 0;
+    border-right: 24px solid transparent;
+    border-left: 24px solid transparent;
+    border-top: 38px solid var(--ink);
+  }
+
+  .student-speech::after {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    left: 60px;
+    bottom: -27px;
+    width: 0;
+    height: 0;
+    border-right: 17px solid transparent;
+    border-left: 17px solid transparent;
+    border-top: 27px solid var(--paper);
+    transform: translateX(7px);
+  }
+
+  .student-speech p {
+    margin: 0;
+    font-size: clamp(16px, 1.15vw, 20px);
+    line-height: 1.55;
+    font-weight: 400;
+    white-space: pre-line;
+  }
+
+  .teacher-response {
+    position: absolute;
+    z-index: 2;
+    top: 32%;
+    right: 11%;
+    width: min(300px, 27%);
+    min-height: 164px;
+    display: grid;
+    align-items: center;
+    padding: 28px 34px;
+    border: 5px double var(--ink);
+    box-shadow: 10px 10px 0 var(--ink);
+    background: var(--paper);
+  }
+
+  .teacher-response::before {
+    content: "";
+    position: absolute;
+    right: 34px;
+    bottom: -31px;
+    width: 0;
+    height: 0;
+    border-right: 21px solid transparent;
+    border-left: 21px solid transparent;
+    border-top: 31px solid var(--ink);
+  }
+
+  .teacher-response::after {
+    content: "";
+    position: absolute;
+    right: 41px;
+    bottom: -20px;
+    width: 0;
+    height: 0;
+    border-right: 14px solid transparent;
+    border-left: 14px solid transparent;
+    border-top: 21px solid var(--paper);
+  }
+
+  .teacher-response p {
+    margin: 0;
+    font-size: clamp(16px, 1.15vw, 20px);
+    line-height: 1.45;
+  }
+
+  .conversation-stage--explanation .student-speech {
+    top: 8%;
+    right: 4.5%;
+    left: 43%;
+    width: auto;
+    min-height: 485px;
+    padding: 34px 40px 32px;
+    animation: wut-explanation-in 240ms steps(3, end) both;
+  }
+
+  .conversation-stage--explanation .student-speech::before,
+  .conversation-stage--explanation .student-speech::after {
+    left: 64px;
+  }
+
+  .conversation-stage--explanation .student-speech p {
+    font-size: clamp(14px, 1.12vw, 19px);
+    line-height: 1.55;
+  }
+
+  .acknowledgement-button {
+    position: absolute;
+    top: 65%;
+    right: 17%;
+    width: min(290px, 28%);
+    min-height: 112px;
+    padding: 20px;
+    border: 5px double var(--ink);
+    box-shadow: 10px 10px 0 var(--ink);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: clamp(20px, 1.55vw, 27px);
+    font-weight: 700;
+    opacity: 1;
+    cursor: pointer;
+  }
+
+  .acknowledgement-button:hover:not(:disabled) {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .acknowledgement-button:focus-visible {
+    outline: 4px solid var(--ink);
+    outline-offset: 5px;
+  }
+
+  .acknowledgement-button:disabled { opacity: .55; }
+
+  .conversation-completion-error {
+    position: absolute;
+    right: 8%;
+    bottom: 176px;
+    max-width: 420px;
+    margin: 0;
+    padding: 10px 14px;
+    border: 3px solid var(--ink);
+    background: var(--paper);
+    font-size: 12px;
+  }
+
+  .voice-control {
+    position: absolute;
+    top: 54%;
+    left: 47%;
+    width: min(410px, 31vw);
+    display: grid;
+    justify-items: center;
+    gap: 17px;
+    text-align: center;
+  }
+
+  .voice-button {
+    width: 132px;
+    height: 132px;
+    display: grid;
+    place-items: center;
+    border: 5px double var(--ink);
+    box-shadow: 10px 10px 0 var(--ink);
+    background: var(--paper);
+  }
+
+  .voice-button svg { width: 54px; height: 54px; fill: currentColor; }
+  .voice-button.is-listening { background: var(--ink); color: var(--paper); }
+  .voice-button:focus-visible,
+  .back-to-material:focus-visible { outline: 4px solid var(--ink); outline-offset: 5px; }
+
+  .voice-control strong {
+    font-size: 20px;
+    letter-spacing: 4px;
+    font-weight: 400;
+  }
+
+  .voice-control > span {
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 2px solid #777;
+    color: #777;
+    font-size: 16px;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  .back-to-material {
+    position: absolute;
+    right: 3.5%;
+    bottom: 76px;
+    min-width: 290px;
+    min-height: 64px;
+    padding: 12px 22px;
+    border: 5px double var(--ink);
+    box-shadow: 8px 8px 0 var(--ink);
+    background: var(--paper);
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+
+  .back-to-material span { margin-right: 10px; font-size: 29px; vertical-align: -2px; }
+
+  .conversation-turn {
+    position: absolute;
+    right: 18px;
+    top: 14px;
+    color: transparent;
+    font-size: 1px;
+  }
+
+  .conversation-footer {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 20px;
+    border-top: 6px solid var(--ink);
+    background: var(--paper);
+  }
+
+  .conversation-footer i { width: 12px; height: 12px; background: #d0d0d0; }
+  .conversation-footer i:first-child { background: var(--ink); }
+
+  @keyframes wut-open-book {
+    from { background-position: 0 0; }
+    to { background-position: 100% 0; }
+  }
+
+  @keyframes wut-open-book-settle {
+    0%, 28% { transform: translateY(0); }
+    45% { transform: translateY(-6px); }
+    62% { transform: translateY(2px); }
+    100% { transform: translateY(0); }
+  }
+
+  @keyframes wut-explanation-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+}
+
+@layer responsive {
+  @media (max-width: 1050px) {
+    .conversation-character { left: 1%; width: min(38vw, 390px); }
+    .student-speech { left: 34%; width: 62%; }
+    .voice-control { left: 42%; width: 50%; }
+    .voice-control strong { font-size: 15px; letter-spacing: 2px; }
+    .voice-control > span { font-size: 12px; }
+    .teacher-response { right: 6%; width: 32%; }
+    .conversation-stage--explanation .student-speech {
+      right: 3%;
+      left: 41%;
+      min-height: 470px;
+      padding: 28px 30px;
+    }
+    .conversation-stage--explanation .student-speech p { font-size: 14px; line-height: 1.5; }
+    .acknowledgement-button { right: 12%; }
+  }
+
+@media (max-width: 780px) {
+    .study-screen--conversation .study-layout { display: block; }
+    .study-screen--conversation .student-sidebar { border-bottom-width: 5px; }
+    .conversation-stage { min-height: 900px; }
+    .conversation-character {
+      left: 2%;
+      bottom: 52px;
+      width: 50%;
+      height: 590px;
+    }
+    .student-speech {
+      top: 34px;
+      right: 18px;
+      left: 18px;
+      width: auto;
+      min-height: 142px;
+      padding: 34px 28px 26px;
+    }
+    .student-speech::before { left: 58%; }
+    .student-speech::after { left: 58%; }
+    .student-speech p { font-size: 16px; }
+    .voice-control {
+      top: 42%;
+      right: 18px;
+      left: auto;
+      width: 45%;
+      gap: 12px;
+    }
+    .voice-button { width: 100px; height: 100px; }
+    .voice-button svg { width: 45px; height: 45px; }
+    .voice-control strong { font-size: 14px; letter-spacing: 2px; }
+    .voice-control > span { white-space: normal; font-size: 11px; }
+    .teacher-response {
+      top: 28%;
+      right: 18px;
+      width: 46%;
+      min-height: 130px;
+      padding: 22px 20px;
+    }
+    .teacher-response p { font-size: 14px; }
+    .conversation-stage--explanation { min-height: 1180px; }
+    .conversation-stage--explanation .conversation-character {
+      top: 480px;
+      bottom: auto;
+      height: 620px;
+    }
+    .conversation-stage--explanation .student-speech {
+      top: 28px;
+      right: 18px;
+      left: 18px;
+      min-height: 410px;
+      padding: 28px 24px;
+    }
+    .conversation-stage--explanation .student-speech::before,
+    .conversation-stage--explanation .student-speech::after { left: 22%; }
+    .conversation-stage--explanation .student-speech p { font-size: 13px; line-height: 1.45; }
+    .acknowledgement-button {
+      top: 78%;
+      right: 18px;
+      width: 46%;
+      min-height: 82px;
+    }
+    .conversation-completion-error { right: 18px; bottom: 142px; max-width: 70%; }
+    .back-to-material {
+      right: 18px;
+      bottom: 68px;
+      min-width: 0;
+      width: 48%;
+      min-height: 56px;
+      padding-inline: 10px;
+      font-size: 12px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .conversation-character-sprite.is-opening-book {
+      animation: none;
+      background-position: 100% 0;
+    }
+
+    .conversation-stage--explanation .student-speech {
+      animation: none;
+    }
+
+  }
+}
+
+.backend-text-control {
+  position: absolute;
+  right: 7%;
+  bottom: 19%;
+  width: min(520px, 48%);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+.backend-text-control label {
+  grid-column: 1 / -1;
+  font: 700 13px/1.4 var(--font-mono);
+}
+.backend-text-control textarea {
+  min-height: 110px;
+  resize: vertical;
+  border: 4px solid var(--ink);
+  padding: 12px;
+  font: 16px/1.5 var(--font-mono);
+  background: var(--paper);
+  box-shadow: 8px 8px 0 var(--ink);
+}
+.backend-text-control .solid-action { min-width: 120px; }
+.backend-finish-button { bottom: 12%; }
+
+@media (max-width: 780px) {
+  .backend-text-control { position: static; width: calc(100% - 32px); margin: 24px 16px 120px; grid-template-columns: 1fr; }
+  .backend-text-control .solid-action { width: 100%; }
+}

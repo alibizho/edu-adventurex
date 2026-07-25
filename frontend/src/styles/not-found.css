@@ -1,0 +1,14 @@
+@layer pages {
+  .not-found-screen { padding-bottom: var(--footer-height); }
+  .not-found-panel { width: min(760px, calc(100% - 40px)); margin: 110px auto; padding: 52px; text-align: center; }
+  .not-found-panel > span { letter-spacing: 3px; }
+  .not-found-panel h1 { margin: 8px 0; font-family: var(--font-display); font-size: 180px; line-height: 1; }
+  .not-found-panel p { margin: 0 auto 36px; max-width: 530px; line-height: 1.7; }
+}
+
+@layer responsive {
+  @media (max-width: 780px) {
+    .not-found-panel { margin-block: 70px; padding: 38px 22px; }
+    .not-found-panel h1 { font-size: 120px; }
+  }
+}

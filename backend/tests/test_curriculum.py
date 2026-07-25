@@ -159,3 +159,13 @@ def test_end_class_folds_memory():
     assert "Waves" in mem.covered_concepts
     assert "Q-answered" in mem.understood      # answered -> understood
     assert "Q-unanswered" in mem.struggled     # unanswered -> still struggled
+
+
+def test_end_class_is_idempotent():
+    c1 = ClassUnit(class_id="c1", title="Optics", objective="Understand optics.")
+    run(store.save_path(_path("gp-idempotent", c1, topic="Physics")))
+    first = run(teaching.end_class("gp-idempotent", "c1", c1))
+    completed_at = first.class_progress["c1"].completed_at
+    second = run(teaching.end_class("gp-idempotent", "c1", c1))
+    assert second.class_progress["c1"].completed_at == completed_at
+    assert second.covered_concepts.count("Optics") == 1

@@ -1,0 +1,14 @@
+@layer cursor {
+  @media (hover: hover) and (pointer: fine) {
+    html {
+      cursor: url("/cursors/wut-arrow.svg") 2 2, auto;
+    }
+
+    body,
+    body *,
+    body *::before,
+    body *::after {
+      cursor: inherit;
+    }
+  }
+}

@@ -1,7 +1,7 @@
 """Shared data model. Everything downstream keys off `Segment.id` — do not change that
 contract without a heads-up (see README)."""
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -90,6 +90,33 @@ class WordScore(BaseModel):
     is_scattered: bool = False
 
 
+class StudentQuestion(BaseModel):
+    """Question produced on the GPU from the strongest detected anomaly."""
+    question_text: str
+    target_concept: str
+    anomaly_type: str
+
+
+class CurriculumUpdate(BaseModel):
+    """New, valid concepts introduced beyond the current curriculum context."""
+    added_concepts: list[str] = Field(default_factory=list)
+
+
+class SpeechProsody(BaseModel):
+    """How the utterance sounded, measured in the browser from the same RMS blocks the recorder's
+    voice-activity detection already runs on (see useContinuousRecorder.ts).
+
+    It exists because the ml-service's hesitation score is z-scored *within* an utterance, so it
+    cannot see speech that is unsure the whole way through — hedge from start to finish and no
+    single word is an outlier. Pauses and dead air are absolute and need no model."""
+    speech_ms: int = 0
+    total_ms: int = 0
+    pause_count: int = 0            # internal stalls over ~350ms that didn't end the utterance
+    longest_pause_ms: int = 0
+    mean_level: float = 0.0
+    peak_level: float = 0.0
+
+
 class ChunkAnalysis(BaseModel):
     chunk_id: int                   # aligns with the segment/clause spine when both exist
     text: str
@@ -97,6 +124,12 @@ class ChunkAnalysis(BaseModel):
     anomalies: list[Anomaly] = Field(default_factory=list)
     localized_target: Optional[str] = None   # the specific word that broke, if any (ml-service)
     detail: list[WordScore] = Field(default_factory=list)   # per-word Space-A detail (ml-service)
+    student_question: Optional[StudentQuestion] = None
+    curriculum_update: Optional[CurriculumUpdate] = None
+    prosody: Optional[SpeechProsody] = None
+    # What the ml-service alone reported, kept after prosody fusion so the two can be compared
+    # while ABSOLUTE_DISSONANCE is being calibrated.
+    gpu_confidence: Optional[float] = None
 
 
 # ---- fusion: confidence x competence (report §6) ----
@@ -145,16 +178,29 @@ class ChunkQuestionResponse(BaseModel):
 
 # ---- learning plan: growth path + classes + cross-class memory ----
 
+class ClassObjective(BaseModel):
+    """One checkable thing the learner must be able to explain. The class is passed by covering
+    these, not by talking for long enough."""
+    id: str                             # "o1", stable within the class
+    text: str                           # "Explain why force and acceleration are proportional"
+
+
 class ClassUnit(BaseModel):
     """One class = one topic the learner must understand by teaching it. No subtopics — a class is
     the unit of teaching. Teacher's notes are generated lazily, right before the class starts."""
     class_id: str
     title: str                          # "Newton's Laws of Motion" — the class IS the topic
     objective: str                      # one-sentence learning goal
+    objectives: list[ClassObjective] = Field(default_factory=list)  # the checkable breakdown
     difficulty: str = "beginner"        # beginner | intermediate | advanced
     prerequisites: list[str] = Field(default_factory=list)  # class_ids that should come first
     teacher_notes: str = ""             # Markdown primer, generated lazily (may embed ```mermaid)
     notes_generated: bool = False
+
+    def checklist(self) -> list[ClassObjective]:
+        """Objectives to grade against. Plans built before objectives existed fall back to the
+        single one-sentence goal, so old paths keep working instead of showing an empty class."""
+        return self.objectives or [ClassObjective(id="o1", text=self.objective)]
 
 
 class GrowthPath(BaseModel):
@@ -182,14 +228,37 @@ class TopicScope(BaseModel):
     suggested_classes: int
 
 
+class ClassProgressRecord(BaseModel):
+    status: Literal["not_started", "in_progress", "complete"] = "not_started"
+    readiness: int = 0                  # % of this class's objectives actually covered
+    turn_count: int = 0
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
+    completion_mode: Optional[Literal["self-teaching", "guided-explanation"]] = None
+    analysis_status: Literal["not_started", "pending", "running", "complete", "failed"] = "not_started"
+    analysis_error: Optional[str] = None
+
+    # --- objective mastery ---
+    covered_objectives: list[str] = Field(default_factory=list)   # ClassObjective ids
+    # id -> the sentence that earned it. Keeps the checkmark accountable: the summary can show
+    # what the learner actually said instead of asking them to trust a tick.
+    objective_evidence: dict[str, str] = Field(default_factory=dict)
+    # Highest segment id already judged, so a background check never re-grades old speech.
+    last_checked_segment: int = -1
+    last_goal_probe_turn: int = -1      # throttles "you haven't covered X yet" nudges
+    passed_on_mastery: bool = False     # ended having covered everything, vs just stopped
+
+
 class PathMemory(BaseModel):
     """Durable cross-class memory so the AI doesn't re-teach or re-ask across classes. Keyed by
     path_id (spans every class in the plan)."""
     path_id: str
+    class_progress: dict[str, ClassProgressRecord] = Field(default_factory=dict)
     covered_concepts: list[str] = Field(default_factory=list)  # already taught → don't re-teach
     asked_questions: list[str] = Field(default_factory=list)   # already asked → no near-duplicates
     understood: list[str] = Field(default_factory=list)        # learner got it → skip
     struggled: list[str] = Field(default_factory=list)         # didn't get it → OK to re-probe
+    expanded_concepts: list[str] = Field(default_factory=list)  # valid beyond-scope concepts found live
 
 
 # ---- learning-plan API I/O ----
@@ -216,6 +285,58 @@ class ClassTeachResponse(BaseModel):
     new_segment: Segment
     asked: bool = False
     question: Optional[TargetedQuestion] = None
+
+
+class AudioClassTeachResponse(BaseModel):
+    """One browser-recorded teaching turn, including the GPU analysis when available."""
+    student_reply: str = ""
+    new_segment: Optional[Segment] = None
+    analysis: ChunkAnalysis
+    asked: bool = False
+    question: Optional[TargetedQuestion] = None
+    degraded: bool = False
+    # Nothing left to teach in this class. Lets the UI say "the class is following" instead of
+    # leaving a silent turn ambiguous between "you're doing well" and "it's broken".
+    all_goals_covered: bool = False
+
+
+class EndClassRequest(BaseModel):
+    completion_mode: Literal["self-teaching", "guided-explanation"] = "self-teaching"
+
+
+class MaterialFileSummary(BaseModel):
+    name: str
+    media_type: str
+    size: int
+    extracted_characters: int
+
+
+class MaterialExtractionResponse(BaseModel):
+    material_text: str
+    files: list[MaterialFileSummary]
+    warnings: list[str] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class AnalysisJob(BaseModel):
+    session_id: str
+    status: Literal["pending", "running", "complete", "failed"]
+    error: Optional[str] = None
+    updated_at: float
+
+
+class AnalysisStatusResponse(AnalysisJob):
+    run: Optional[RunResult] = None
+    fusion: Optional[FusionResult] = None
+
+
+class SessionSnapshot(BaseModel):
+    session_id: str
+    transcript: list[Segment] = Field(default_factory=list)
+    analyses: list[ChunkAnalysis] = Field(default_factory=list)
+    questions: list[QAEntry] = Field(default_factory=list)
+    run: Optional[RunResult] = None
+    fusion: Optional[FusionResult] = None
 
 
 # ---- API I/O ----

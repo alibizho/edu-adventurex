@@ -12,7 +12,7 @@ uncertain/confused. The backend targets the LOWEST-confidence chunks.
 import re
 
 from ..config import settings
-from ..schemas import Anomaly, ChunkAnalysis
+from ..schemas import Anomaly, ChunkAnalysis, SpeechProsody
 
 # Uncertainty markers → lower confidence. Weight is how much each drags confidence down.
 _HEDGES = [
@@ -81,6 +81,64 @@ def has_confusion_markers(text: str) -> bool:
     if _HEDGE_RE.search(text):
         return True
     return text.strip().endswith("?")
+
+
+def prosody_confidence(prosody: SpeechProsody, word_count: int) -> float:
+    """How clear the delivery sounded, from browser-measured timing alone. [0,1], HIGH = fluent.
+
+    Deliberately model-free. The ml-service scores hesitation relative to the rest of the same
+    utterance, which cannot see speech that is unsure throughout; dead air and stalls are absolute
+    and mean the same thing regardless of what surrounds them.
+    """
+    if prosody.total_ms <= 0:
+        return 1.0
+
+    conf = 1.0
+    speech_ratio = prosody.speech_ms / prosody.total_ms
+    # Long gaps between words: thinking mid-sentence, not a considered pause between them.
+    if speech_ratio < 0.65:
+        conf -= min(0.4, (0.65 - speech_ratio) * 1.6)
+
+    # Repeated stalls. One is a breath; several in one utterance is someone assembling an
+    # explanation they don't have ready.
+    if prosody.pause_count >= 2:
+        conf -= min(0.3, (prosody.pause_count - 1) * 0.12)
+
+    # A single long freeze is its own signal even when everything else flows.
+    if prosody.longest_pause_ms >= 1200:
+        conf -= min(0.25, (prosody.longest_pause_ms - 1200) / 4000 + 0.1)
+
+    # Trailing off mid-explanation — the words are there but the voice gives up on them.
+    if prosody.peak_level > 0 and prosody.mean_level / prosody.peak_level < 0.18:
+        conf -= 0.1
+
+    # Speaking rate, only once there are enough words for it to mean anything.
+    voiced_seconds = prosody.speech_ms / 1000
+    if word_count >= 6 and voiced_seconds > 1:
+        words_per_second = word_count / voiced_seconds
+        if words_per_second < 1.6:
+            conf -= min(0.2, (1.6 - words_per_second) * 0.25)
+
+    return round(max(0.05, min(1.0, conf)), 2)
+
+
+def fuse_prosody(analysis: ChunkAnalysis, prosody: SpeechProsody | None) -> ChunkAnalysis:
+    """Combine the GPU's confidence with the browser's, pessimistically.
+
+    `min` rather than a weighted blend on purpose: one signal is uncalibrated (the cosine
+    dissonance scale depends on the trained brain) and the other is a direct measurement. Taking
+    whichever is more worried is explainable, cannot be tuned into nonsense, and fails toward
+    asking the learner a question — which is the cheap mistake. The ml-service's own value is kept
+    on `gpu_confidence` so the two can be compared while ABSOLUTE_DISSONANCE is calibrated.
+    """
+    if prosody is None:
+        return analysis
+    analysis.prosody = prosody
+    analysis.gpu_confidence = analysis.confidence
+    analysis.confidence = min(
+        analysis.confidence, prosody_confidence(prosody, len(analysis.text.split()))
+    )
+    return analysis
 
 
 def is_confused(analysis: ChunkAnalysis) -> bool:

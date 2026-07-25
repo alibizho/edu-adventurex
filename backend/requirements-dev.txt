@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8,<10
+numpy                   # tests/test_ml_engine_signals.py drives ml-service/engine.py's Space-A
+                        # scoring, which is pure numpy. Not a backend runtime dependency.

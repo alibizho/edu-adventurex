@@ -7,13 +7,17 @@ so the confusion client degrades to a neutral analysis instead of hitting a real
 """
 import asyncio
 import os
+from unittest.mock import patch
 
 os.environ["STORE_BACKEND"] = "memory"
 os.environ["ML_SERVICE_URL"] = "http://127.0.0.1:9"  # unreachable -> neutral degrade
 
 from fastapi.testclient import TestClient  # noqa: E402
+from httpx import Request, Response  # noqa: E402
+from openai import AuthenticationError  # noqa: E402
 
 from app.confusion import engine  # noqa: E402
+from app.curriculum.build import CurriculumGenerationError  # noqa: E402
 from app.fusion import DISTURBANCE_HIGH, fuse  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas import (  # noqa: E402
@@ -32,6 +36,26 @@ client = TestClient(app)
 def run(coro):
     """Drive a store coroutine to completion (memory store does no real I/O)."""
     return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_invalid_curriculum_shape_returns_actionable_502():
+    async def invalid_curriculum(_request):
+        raise CurriculumGenerationError("invalid model output")
+
+    with patch("app.api.plan_routes.build_plan", invalid_curriculum):
+        response = client.post(
+            "/plan/build",
+            json={
+                "original_input": "quantum mechanics",
+                "confirmed_topic": "quantum mechanics",
+                "num_classes": 5,
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "THE LANGUAGE MODEL COULD NOT PRODUCE A VALID COURSE STRUCTURE. PLEASE TRY AGAIN."
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -178,7 +202,34 @@ def test_fuse_calibration_rho_positive_when_calibrated():
 
 def test_root_and_health():
     assert client.get("/").json()["service"] == "wut"
-    assert client.get("/health").json() == {"ok": True}
+    health = client.get("/health").json()
+    assert health["ok"] is True
+    assert health["store_backend"] == "memory"
+    assert isinstance(health["llm_configured"], bool)
+
+
+def test_llm_authentication_error_is_not_reported_as_dead_backend():
+    async def reject_scope(_request):
+        request = Request("POST", "https://api.deepseek.com/chat/completions")
+        response = Response(401, request=request)
+        raise AuthenticationError(
+            "invalid key",
+            response=response,
+            body={"error": {"message": "invalid key"}},
+        )
+
+    with patch("app.api.plan_routes.scope_topic", reject_scope):
+        response = client.post(
+            "/plan/scope",
+            json={"original_input": "quantum physics", "material_text": None},
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": (
+            "THE LANGUAGE MODEL API KEY IS INVALID. UPDATE backend/.env AND RESTART THE BACKEND."
+        )
+    }
 
 
 def test_confusion_health_reports_unreachable():

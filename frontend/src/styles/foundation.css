@@ -1,0 +1,62 @@
+@layer reset, tokens, base, components, pages, responsive, cursor;
+
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+  body { min-height: 100vh; }
+  button, input, textarea { font: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer tokens {
+  :root {
+    --ink: #050505;
+    --paper: #fff;
+    --soft: #f4f4f4;
+    --gray: #d7d7d7;
+    --muted: #8e8e8e;
+    --line: 3px;
+    --hard-shadow: 6px 6px 0 var(--ink);
+    --header-height: 90px;
+    --footer-height: 58px;
+    --font-display: "Bebas Neue", Impact, sans-serif;
+    --font-mono: "Space Mono", "Courier New", monospace;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-weight: 700;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  button { color: inherit; }
+
+  .screen {
+    position: relative;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background: var(--paper);
+  }
+
+  .halftone-screen {
+    background-color: var(--paper);
+    background-image: radial-gradient(circle, rgba(0, 0, 0, .58) .8px, transparent .9px);
+    background-size: 4px 4px;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}

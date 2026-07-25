@@ -17,10 +17,12 @@ from sqlalchemy import text
 from app.schemas import (
     Anomaly,
     ChunkAnalysis,
+    CurriculumUpdate,
     QuestionDelta,
     RunResult,
     Score,
     Segment,
+    StudentQuestion,
     TargetedQuestion,
     WordScore,
 )
@@ -64,13 +66,35 @@ async def main() -> None:
             anomalies=[Anomaly(type="hedging", source="mock", score=0.1, evidence="um")],
             detail=[WordScore(word="light", hesitation_zscore=1.5, is_anomaly=True)],
         ))
-        await st.append_analysis(sid, ChunkAnalysis(chunk_id=1, text="They make sugar.", confidence=0.4))
+        await st.append_analysis(sid, ChunkAnalysis(
+            chunk_id=1,
+            text="They make sugar.",
+            confidence=0.4,
+            student_question=StudentQuestion(
+                question_text="Where does the carbon come from?",
+                target_concept="carbon fixation",
+                anomaly_type="recall_failure",
+            ),
+            curriculum_update=CurriculumUpdate(
+                added_concepts=["Calvin cycle"]
+            ),
+        ))
         # re-analyze chunk 0 -> should UPDATE in place, not duplicate
         await st.append_analysis(sid, ChunkAnalysis(chunk_id=0, text="Plants use light.", confidence=0.55))
         an = await st.get_analyses(sid)
         check(len(an) == 2, "append_analysis upserts (no duplicate for re-analyzed chunk 0)")
         check(an[0].confidence == 0.55, "re-analyzed chunk 0 updated in place")
         check(an[1].anomalies == [] and an[0].chunk_id == 0, "analyses ordered by chunk_id")
+        check(
+            an[1].student_question is not None
+            and an[1].student_question.target_concept == "carbon fixation",
+            "GPU student question JSONB round-trip",
+        )
+        check(
+            an[1].curriculum_update is not None
+            and an[1].curriculum_update.added_concepts == ["Calvin cycle"],
+            "curriculum update JSONB round-trip",
+        )
 
         # set_analyses replaces the whole set
         await st.set_analyses(sid, [ChunkAnalysis(chunk_id=5, text="replaced", confidence=0.7)])

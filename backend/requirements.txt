@@ -6,7 +6,13 @@ openai
 python-dotenv
 httpx                   # async client -> ml-service /analyze
 python-multipart        # audio uploads to /confusion/analyze
+pypdf                   # text extraction from regular PDFs
+pypdfium2               # render scanned PDF pages for OCR
+Pillow                  # image validation and OCR input
+pytesseract             # local English OCR (Tesseract binary is installed in Docker)
 sqlalchemy>=2.0         # ORM + async engine for the Postgres context store
 asyncpg                 # async Postgres driver for SQLAlchemy
+greenlet                # required by SQLAlchemy's async engine; NOT pulled in automatically —
+                        # without it every DB call dies with "the greenlet library is required"
 langchain>=1,<2         # curriculum/plan orchestration (scope, structure, notes)
 langchain-openai>=1,<2  # ChatOpenAI over the OpenAI-compatible DeepSeek endpoint

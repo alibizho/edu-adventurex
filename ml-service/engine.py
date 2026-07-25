@@ -22,8 +22,18 @@ Extra signals folded in (cognitive-load prototype):
     word took abnormally long to say.
   - attention entropy: per-token entropy of the cross-attention -> 'scattered' alignment when the
     model can't localize a word to specific audio frames. Both pooled to words the same way.
+
+Curriculum grounding (added once the backend had a teaching plan to send):
+  - the caller passes the class objective/notes/material and the concepts already covered, so
+    Space C judges against THAT rather than the judge's general knowledge, and can distinguish
+    wrong (CONTRADICTION) from off-syllabus (OFF_TOPIC) from correct-but-advanced (BEYOND).
+  - cross-modal fusion: when the words are right but the delivery is laboured, that's a
+    fluency_issue — recitation without understanding, which no single space catches alone.
+  - the AI student's question is written here, from the strongest anomaly, while the word-level
+    evidence is still in hand; the backend just relays it.
 """
 import os
+import re
 
 import numpy as np
 import torch
@@ -32,15 +42,15 @@ import torchaudio
 
 import config as C
 from alignment import AlignmentEngine
-from schemas import (Anomaly, ChunkAnalysis, WordScore, COGNITIVE_LOAD, FACTUAL_ERROR,
-                     LOGIC_ERROR, RECALL_FAILURE)
-
-PACE_Z_THRESHOLD = 1.5   # articulation slower than this many SD -> bottleneck
+from schemas import (Anomaly, BEYOND, ChunkAnalysis, COGNITIVE_LOAD, CurriculumUpdate,
+                     FACTUAL_ERROR, FLUENCY_ISSUE, LOGIC_ERROR, OFF_TOPIC, RECALL_FAILURE,
+                     StudentQuestion, WordScore)
 
 
 class ConfusionEngine:
     def __init__(self) -> None:
         self.device = C.DEVICE
+        self._warned_pace = False       # log the dead-pace diagnosis once, not per request
         print(f"[engine] device={self.device}  whisper={C.WHISPER_MODEL}/{C.WHISPER_COMPUTE}  "
               f"space_c={C.ENABLE_SPACE_C}  judge={C.JUDGE_BACKEND}")
         self._load_asr()
@@ -111,24 +121,29 @@ class ConfusionEngine:
             kwargs["device_map"] = "auto" if self.device == "cuda" else None
         self.qwen = AutoModelForCausalLM.from_pretrained(C.QWEN_MODEL, **kwargs)
 
-    # ---------- judge (Space B / C) ----------
+    # ---------- judge (Space B / C / question writing) ----------
 
-    def _judge(self, prompt: str, max_tokens: int = 64) -> str:
-        """One judge completion. max_tokens is larger than the notebook's 8 because the judge now
-        returns a span + correction, not just a one-word verdict. Any failure (bad key, timeout,
-        rate limit) degrades to '' -> parsed as no-contradiction, so /analyze never 500s on the
-        judge; the warning tells you to fix it."""
+    def _judge(self, prompt: str, max_tokens: int | None = None, temperature: float = 0.0) -> str:
+        """One judge completion. max_tokens defaults to JUDGE_MAX_TOKENS — far above the notebook's
+        8 — because the judge now returns a span + correction, and writes the student's question.
+        Any failure (bad key, timeout, rate limit) degrades to '' -> parsed as no-contradiction, so
+        /analyze never 500s on the judge; the warning tells you to fix it. temperature > 0 is only
+        used for question writing, where identical phrasing every turn would be obvious."""
+        if max_tokens is None:
+            max_tokens = C.JUDGE_MAX_TOKENS
         try:
             if C.JUDGE_BACKEND == "api":
                 r = self._judge_client.chat.completions.create(
-                    model=C.JUDGE_API_MODEL, temperature=0.0, max_tokens=max_tokens,
+                    model=C.JUDGE_API_MODEL, temperature=temperature, max_tokens=max_tokens,
                     messages=[{"role": "user", "content": prompt}])
                 return (r.choices[0].message.content or "").strip()
             messages = [{"role": "user", "content": prompt}]
             text = self.qwen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.qwen_tok([text], return_tensors="pt").to(self.qwen.device)
             with torch.inference_mode():
-                out = self.qwen.generate(inputs.input_ids, max_new_tokens=max_tokens, do_sample=False)
+                out = self.qwen.generate(
+                    inputs.input_ids, max_new_tokens=max_tokens, do_sample=(temperature > 0),
+                    temperature=temperature if temperature > 0 else None)
             return self.qwen_tok.batch_decode(out[:, inputs.input_ids.shape[1]:],
                                               skip_special_tokens=True)[0].strip()
         except Exception as e:
@@ -137,16 +152,21 @@ class ConfusionEngine:
 
     @staticmethod
     def _parse_verdict(out: str) -> dict:
-        """Parse 'VERDICT | offending span | correction' (span/correction optional)."""
+        """Parse 'VERDICT | offending span | correction' (span/correction optional).
+
+        Order matters: a BEYOND/OFF_TOPIC reply often also contains the word "aligned" in its
+        explanation, so the more specific verdicts are checked first."""
         up = out.upper()
+        verdict = "CONSISTENT"
         if "CONTRADICTION" in up:
             verdict = "CONTRADICTION"
+        elif "BEYOND" in up:
+            verdict = "BEYOND"
+        elif "OFF_TOPIC" in up:
+            verdict = "OFF_TOPIC"
         elif "ALIGNED" in up:
             verdict = "ALIGNED"
-        elif "UNRELATED" in up:
-            verdict = "UNRELATED"
-        else:
-            verdict = "CONSISTENT"
+
         span = correction = None
         if "|" in out:
             parts = [p.strip() for p in out.split("|")]
@@ -159,8 +179,10 @@ class ConfusionEngine:
     # ---------- main entry ----------
 
     def analyze(self, audio_path: str, history: list[str], chunk_id: int = 0,
-                enable_space_c: bool | None = None) -> ChunkAnalysis:
+                enable_space_c: bool | None = None, overall_topic: str = "",
+                curriculum_context: str = "", key_concepts: list[str] | None = None) -> ChunkAnalysis:
         use_c = C.ENABLE_SPACE_C if enable_space_c is None else enable_space_c
+        key_concepts = key_concepts or []
 
         y, transcript, words, lang = self._transcribe(audio_path)
         if not words:
@@ -168,12 +190,22 @@ class ConfusionEngine:
 
         sa = self._space_a(y, transcript, words)
         n_w = len(words)
-        red = [i for i, z in enumerate(sa["z"]) if z > C.ZSCORE_ANOMALY and 0 < i < n_w - 1]
+        # Two ways to be a hesitant word, because they catch opposite failures:
+        #   z   — this word stands out against the rest of THIS utterance. Blind to uniform
+        #         confusion: hedge through the whole sentence and nothing is an outlier.
+        #   raw — absolute audio/text dissonance. Catches the utterance that is shaky throughout,
+        #         which is exactly the case the z-score cannot see.
+        red = [
+            i for i in range(n_w)
+            if 0 < i < n_w - 1
+            and (sa["z"][i] > C.ZSCORE_ANOMALY or sa["raw"][i] > C.ABSOLUTE_DISSONANCE)
+        ]
 
         logic = self._space_b(transcript, history)
-        fact = self._space_c(transcript) if use_c else {"verdict": "SKIP"}
+        fact = self._space_c(transcript, curriculum_context, key_concepts) if use_c else {"verdict": "SKIP"}
 
-        return self._build(chunk_id, transcript, words, sa, red, logic, fact, history)
+        return self._build(chunk_id, transcript, words, sa, red, logic, fact, history,
+                           overall_topic, curriculum_context)
 
     # ---------- stages ----------
 
@@ -194,7 +226,7 @@ class ConfusionEngine:
                      for seg in segments if seg.words for w in seg.words]
             if words:
                 return y, " ".join(w["word"] for w in words), words, info.language
-        except (MemoryError, RuntimeError) as e:
+        except Exception as e:
             print(f"[engine] word-timestamp alignment failed ({e!r}); using segment-level timing")
 
         # Fallback: no word alignment. Spread each segment's [start,end] across its words by char
@@ -236,15 +268,30 @@ class ConfusionEngine:
         word_scores = self._pool_to_words(tok_dist, transcript, words, offsets, agg="max")
         entropy_w = self._pool_to_words(tok_entropy, transcript, words, offsets, agg="max")
 
-        mean, std = word_scores.mean(), max(word_scores.std(), 1e-6)
-        z = (word_scores - mean) / std
+        mean_ws, std_ws = word_scores.mean(), max(word_scores.std(), 1e-6)
+        z = (word_scores - mean_ws) / std_ws
 
         # cognitive load: articulation time per character, z-scored across the utterance.
         rate = np.array([max(1e-3, w["end"] - w["start"]) / max(len(w["word"].strip()), 1) for w in words])
-        pm, ps = rate.mean(), max(rate.std(), 1e-6)
-        pace_z = (rate - pm) / ps
 
-        return {"z": z, "raw": word_scores, "pace_z": pace_z, "entropy": entropy_w}
+        # Is that rate telling us anything? When Whisper's word alignment fails, `_transcribe`
+        # falls back to splitting a segment's duration proportionally to word length — which makes
+        # seconds-per-character IDENTICAL for every word by construction. The z-scores then come
+        # out as a row of zeros, which reads downstream as "perfectly even delivery" when the truth
+        # is "we didn't measure it". Detect it from the data rather than from which branch ran,
+        # since alignment can also succeed and return degenerate spans.
+        pace_ok = bool(rate.std() > 1e-4)
+        if not pace_ok and not self._warned_pace:
+            print("[engine] word timings are uniform — pace/cognitive-load signal unavailable. "
+                  "Check that WHISPER_MODEL supports word_timestamps and that WHISPER_COMPUTE "
+                  "isn't crashing model.align().")
+            self._warned_pace = True
+
+        pm, ps = rate.mean(), max(rate.std(), 1e-6)
+        pace_z = (rate - pm) / ps if pace_ok else np.zeros_like(rate)
+
+        return {"z": z, "raw": word_scores, "pace_z": pace_z, "entropy": entropy_w,
+                "pace_ok": pace_ok}
 
     def _pool_to_words(self, per_token, transcript, words, offsets, agg="max"):
         """Aggregate a per-(sub)token array into per-word values by char-span overlap. 'max' lets
@@ -279,23 +326,37 @@ class ConfusionEngine:
         ctx = " ".join(history)
         out = self._judge(
             f"EARLIER: {ctx}\nNOW: {transcript}\n"
-            "Does NOW logically contradict EARLIER? Reply on ONE line, exactly one of:\n"
+            "Does NOW contradict EARLIER? Reply ONE line:\n"
             "CONSISTENT\n"
-            "CONTRADICTION | <the exact words from NOW that conflict>")
+            "CONTRADICTION | <exact words>")
         return self._parse_verdict(out)
 
-    def _space_c(self, transcript: str) -> dict:
-        """LLM-only fact check — no retrieval DB. The judge decides from its own knowledge whether
-        the claim is factually correct, and names the wrong span + correction. Broader coverage
-        than a slim vector DB for common curriculum facts; swap back to RAG for syllabus-grounded
-        or citable checking."""
-        out = self._judge(
-            f"CLAIM: {transcript}\n"
-            "Is this claim factually correct for a school-level explanation? Reply on ONE line,\n"
-            "exactly one of:\n"
-            "ALIGNED\n"
-            "CONTRADICTION | <exact wrong words from the claim> | <the correction>",
-            max_tokens=80)
+    def _space_c(self, transcript: str, curriculum_context: str, key_concepts: list[str]) -> dict:
+        """Fact check. With curriculum context the judge grades against the material actually being
+        taught, which is what makes OFF_TOPIC and BEYOND meaningful — without it there is no
+        syllabus to be off, or beyond. Falls back to a bare LLM-knowledge check otherwise."""
+        if curriculum_context:
+            prompt = (
+                f"REFERENCE MATERIAL (Ground Truth):\n{curriculum_context[:1500]}\n\n"
+                f"KEY CONCEPTS:\n{', '.join(key_concepts)}\n\n"
+                f"STUDENT'S EXPLANATION:\n{transcript}\n\n"
+                "Evaluate the explanation against the reference:\n"
+                "- ALIGNED: Correct and covers the material.\n"
+                "- CONTRADICTION: Factually wrong or contradicts the reference.\n"
+                "- BEYOND: Factually correct, but introduces advanced concepts NOT in the reference.\n"
+                "- OFF_TOPIC: Completely unrelated to the reference material or key concepts.\n\n"
+                "Reply on ONE line:\n"
+                "ALIGNED\n"
+                "CONTRADICTION | <exact wrong words> | <correction from reference>\n"
+                "BEYOND | <the new advanced concept introduced>\n"
+                "OFF_TOPIC | <brief reason>"
+            )
+        else:
+            prompt = (
+                f"CLAIM: {transcript}\nIs this claim factually correct? Reply on ONE line:\n"
+                "ALIGNED\nCONTRADICTION | <exact wrong words> | <correction>"
+            )
+        out = self._judge(prompt, max_tokens=120)
         return self._parse_verdict(out)
 
     # ---------- assembly ----------
@@ -312,13 +373,17 @@ class ConfusionEngine:
                 return i
         return -1
 
-    def _build(self, chunk_id, transcript, words, sa, red, logic, fact, history):
+    def _build(self, chunk_id, transcript, words, sa, red, logic, fact, history,
+               overall_topic, curriculum_context):
         z_scores, pace_z, entropy_w = sa["z"], sa["pace_z"], sa["entropy"]
+        raw = sa["raw"]
+        pace_ok = sa.get("pace_ok", True)
         n = len(words)
 
         e_mean, e_std = entropy_w.mean(), max(entropy_w.std(), 1e-6)
         scattered = entropy_w > (e_mean + 2 * e_std)
-        bottleneck = pace_z > PACE_Z_THRESHOLD
+        # No pace measurement means no bottlenecks — not "no bottlenecks found".
+        bottleneck = (pace_z > C.PACE_Z_THRESHOLD) if pace_ok else np.zeros(n, dtype=bool)
 
         anomalies: list[Anomaly] = []
 
@@ -347,7 +412,7 @@ class ConfusionEngine:
                 type=LOGIC_ERROR, source="space_b/text-text", score=0.7,
                 evidence=f"'{where}' contradicts earlier: '{' '.join(history)[:80]}'"))
 
-        # Space C: factual error — the wrong span + the correction.
+        # Space C: wrong / off-syllabus / past-the-syllabus, against the curriculum context.
         c_target = self._locate(words, fact.get("span"))
         if fact.get("verdict") == "CONTRADICTION":
             where = words[c_target]["word"].strip() if c_target >= 0 else (fact.get("span") or "?")
@@ -355,24 +420,83 @@ class ConfusionEngine:
             anomalies.append(Anomaly(
                 type=FACTUAL_ERROR, source="space_c/text-knowledge", score=0.8,
                 evidence=f"'{where}' is wrong" + (f" — correct: {corr}" if corr else "")))
+        elif fact.get("verdict") == "OFF_TOPIC":
+            anomalies.append(Anomaly(
+                type=OFF_TOPIC, source="space_c/text-knowledge", score=0.9,
+                evidence=f"Drifted from core material: {fact.get('span') or 'unrelated'}"))
+        elif fact.get("verdict") == "BEYOND":
+            anomalies.append(Anomaly(
+                type=BEYOND, source="space_c/text-knowledge", score=1.0,
+                evidence=f"Introduced advanced concept: {fact.get('span')}"))
 
-        # primary target: a confident factual/logic error outranks a mere hesitation.
-        target_idx = next((t for t in (c_target, b_target, a_target) if t >= 0), -1)
+        # Cross-modal fusion — hollow recitation. The content checks out, but a large share of the
+        # words cost visible effort to produce: memorised, not understood. Neither space sees this
+        # alone; it only exists in the disagreement between them.
+        if (fact.get("verdict") in ("ALIGNED", "BEYOND", "CONSISTENT") and load_idx
+                and (len(load_idx) / max(n, 1) > C.FLUENCY_LOAD_RATIO_THRESHOLD)):
+            worst_load = max(load_idx, key=lambda i: pace_z[i] + z_scores[i])
+            anomalies.append(Anomaly(
+                type=FLUENCY_ISSUE, source="space_a+c/cross_modal", score=0.75,
+                evidence=f"Said '{words[worst_load]['word'].strip()}' correctly, but delivery was "
+                         "highly unconfident/strained."))
+
+        # Primary target, most-diagnostic first: a wrong fact beats drift, beats self-contradiction,
+        # beats strained delivery, beats a bare hesitation.
+        target_idx = -1
+        if fact.get("verdict") == "CONTRADICTION" and c_target >= 0:
+            target_idx = c_target
+        elif fact.get("verdict") == "OFF_TOPIC":
+            target_idx = load_idx[0] if load_idx else 0
+        elif logic.get("verdict") == "CONTRADICTION" and b_target >= 0:
+            target_idx = b_target
+        elif any(a.type == FLUENCY_ISSUE for a in anomalies) and load_idx:
+            target_idx = max(load_idx, key=lambda i: pace_z[i] + z_scores[i])
+        elif a_target >= 0:
+            target_idx = a_target
+
         localized_target = None
         if target_idx >= 0:
             localized_target = words[target_idx]["word"].strip(".,!?;:\"'()[]{}")
-        elif fact.get("verdict") == "CONTRADICTION" and fact.get("span"):
+        elif fact.get("verdict") in ("CONTRADICTION", "BEYOND", "OFF_TOPIC") and fact.get("span"):
             localized_target = fact["span"]
         elif logic.get("verdict") == "CONTRADICTION" and logic.get("span"):
             localized_target = logic["span"]
 
-        # dissonance -> confidence in [0,1] (HIGH = clear).
-        anomaly_ratio = len(red) / max(n, 1)
-        load_ratio = len(load_idx) / max(n, 1)
-        conf = 1.0 - min(0.6, 0.6 * anomaly_ratio) - min(0.2, 0.2 * load_ratio)
-        conf -= 0.3 if logic.get("verdict") == "CONTRADICTION" else 0.0
-        conf -= 0.4 if fact.get("verdict") == "CONTRADICTION" else 0.0
+        # dissonance -> confidence in [0,1] (HIGH = clear). Absolute severity, not ratios: one
+        # badly-stumbled word in a long sentence still means the speaker lost the thread there.
+        conf = 1.0
+        if logic.get("verdict") == "CONTRADICTION":
+            conf -= 0.3
+        if fact.get("verdict") == "CONTRADICTION":
+            conf -= 0.4
+        if fact.get("verdict") == "OFF_TOPIC":
+            conf -= 0.5
+        if load_idx and pace_ok:
+            conf -= min(0.4, max(pace_z[load_idx]) / 4.0)
+        if red:
+            conf -= min(0.2, max(z_scores[red]) / 5.0)
+        # Overall shakiness, independent of any outlier. Without this an utterance that is
+        # uniformly unsure scores a clean 1.0, because every penalty above needs something to
+        # stand out — and when you hedge all the way through, nothing does.
+        mean_raw = float(raw.mean()) if n else 0.0
+        if mean_raw > C.ABSOLUTE_DISSONANCE:
+            conf -= min(0.5, (mean_raw - C.ABSOLUTE_DISSONANCE) * 2.0)
         confidence = round(float(min(1.0, max(0.05, conf))), 2)
+
+        # BEYOND is not a failure: the learner went past the syllabus and got it right, so the
+        # concept is handed back for the backend to fold into the class instead of being discarded.
+        curriculum_update = None
+        if fact.get("verdict") == "BEYOND" and fact.get("span"):
+            curriculum_update = CurriculumUpdate(added_concepts=[fact["span"]])
+
+        # The AI student's interruption, written here while the word-level evidence is in hand.
+        student_q = None
+        if anomalies and localized_target:
+            primary = next((a for a in anomalies if a.type in (
+                FACTUAL_ERROR, OFF_TOPIC, FLUENCY_ISSUE, BEYOND, LOGIC_ERROR, RECALL_FAILURE)),
+                anomalies[0])
+            student_q = self._generate_student_question(
+                primary, localized_target, overall_topic, curriculum_context, transcript)
 
         red_set = set(red)
         detail = [WordScore(
@@ -386,4 +510,63 @@ class ConfusionEngine:
         ) for i, w in enumerate(words)]
 
         return ChunkAnalysis(chunk_id=chunk_id, text=transcript, confidence=confidence,
-                             anomalies=anomalies, localized_target=localized_target, detail=detail)
+                             anomalies=anomalies, localized_target=localized_target, detail=detail,
+                             student_question=student_q, curriculum_update=curriculum_update)
+
+    def _generate_student_question(self, anomaly: Anomaly, target: str, overall_topic: str,
+                                   curriculum: str, transcript: str) -> StudentQuestion | None:
+        """Turn the strongest anomaly into something a classmate would actually say. The anomaly
+        type picks the stance: confused about an error, intrigued by a BEYOND, gently redirecting
+        an OFF_TOPIC. Returns None when the judge is unreachable or writes nothing usable, and the
+        backend then falls back to its own question generator."""
+        # The curriculum excerpt keeps the question inside what this class actually covers — without
+        # it the judge tends to ask something reasonable but off-syllabus.
+        reference = f'\nWhat the class covers: "{curriculum[:600]}"' if curriculum else ""
+        prompt = f"""You are a student in a classroom. The teacher just spoke.
+Teacher's words: "{transcript}"
+Main Topic: "{overall_topic}"{reference}
+Anomaly detected: {anomaly.type}
+Target/Evidence: {anomaly.evidence}
+
+Rules for your question (max 30 words):
+- If OFF_TOPIC: Ask a question that gently bridges their comment back to the main topic ({overall_topic}).
+- If fluency_issue: Say "You mentioned {target}, but sounded unsure. Can you explain what that means in your own words?"
+- If beyond: Act intrigued. "Wow, how does {target} connect to what we were just learning?"
+- If factual_error/recall_failure: Act confused. "Wait, I thought {target} was different? Can you clarify?"
+
+CRITICAL: Output ONLY the question itself. No thinking, no quotes, no explanations. Just the question."""
+
+        raw_q = self._judge(prompt, max_tokens=150, temperature=0.6)
+        clean_q = self._clean_question(raw_q)
+        if clean_q:
+            return StudentQuestion(question_text=clean_q, target_concept=target,
+                                   anomaly_type=anomaly.type)
+        return None
+
+    @staticmethod
+    def _clean_question(text: str) -> str:
+        """Salvage the question from a chatty judge. Small instruct models ignore "output only the
+        question" often enough that this is load-bearing: a reasoning preamble reaching the UI
+        would break the illusion of a classmate speaking."""
+        if not text:
+            return ""
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+        text = re.sub(r"```.*?```", "", text, flags=re.DOTALL).strip()
+
+        # Reasoning-preamble openers: keep the first sentence that is actually a question.
+        prefixes = ["We need to", "Let's", "I need to", "The rules", "First,", "Since", "Okay,",
+                    "As an AI", "Based on"]
+        for p in prefixes:
+            if text.startswith(p):
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+                for s in sentences:
+                    if '?' in s:
+                        return s.strip().strip('"\'')
+                return sentences[-1].strip().strip('"\'')
+
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        for s in sentences:
+            if '?' in s:
+                return s.strip().strip('"\'')
+
+        return text.strip().strip('"\'')

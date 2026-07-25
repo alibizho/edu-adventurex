@@ -73,9 +73,24 @@ JUDGE_API_BASE = os.environ.get("JUDGE_API_BASE", "https://api.openai.com/v1")
 JUDGE_API_KEY = os.environ.get("JUDGE_API_KEY", "")
 JUDGE_API_MODEL = os.environ.get("JUDGE_API_MODEL", "gpt-4o-mini")
 
+# The judge no longer returns just a verdict: it also writes the AI student's question. 300 leaves
+# room for that, and for reasoning models that emit a preamble before the answer.
+JUDGE_MAX_TOKENS = int(os.environ.get("JUDGE_MAX_TOKENS", "300"))
+
 # --- thresholds (were magic numbers in the notebook) ---
 FACT_DISTANCE_THRESHOLD = float(os.environ.get("FACT_DISTANCE_THRESHOLD", "0.45"))
+# Relative: this word stands out against the rest of the same utterance.
 ZSCORE_ANOMALY = float(os.environ.get("ZSCORE_ANOMALY", "2.0"))
+# Absolute: raw audio/text dissonance, needed because the z-score above is blind to an utterance
+# that is uniformly shaky — hedge the whole way through and no single word is an outlier.
+# UNCALIBRATED: the cosine-dissonance scale depends on the trained brain, so tune this against two
+# real recordings (one confident, one hesitant) rather than trusting the default. Lower = stricter.
+ABSOLUTE_DISSONANCE = float(os.environ.get("ABSOLUTE_DISSONANCE", "0.55"))
+# articulation slower than this many SD -> the word took abnormally long to say (bottleneck).
+PACE_Z_THRESHOLD = float(os.environ.get("PACE_Z_THRESHOLD", "1.5"))
+# Cross-modal fusion: text is correct but this share of words carries cognitive load -> the
+# speaker is reciting rather than understanding, reported as a fluency_issue rather than an error.
+FLUENCY_LOAD_RATIO_THRESHOLD = float(os.environ.get("FLUENCY_LOAD_RATIO_THRESHOLD", "0.15"))
 
 # --- ingestion (ground-truth DB build). Slimmed hard for the 20 GB quota. ---
 INGEST_MAX_ROWS = int(os.environ.get("INGEST_MAX_ROWS", "3000"))

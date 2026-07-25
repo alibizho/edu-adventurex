@@ -22,15 +22,24 @@ def _neutral(chunk_id: int, reason: str) -> ChunkAnalysis:
     return ChunkAnalysis(chunk_id=chunk_id, text="", confidence=1.0)
 
 
-async def analyze_audio(
+async def analyze_audio_with_status(
     audio: bytes,
     filename: str = "chunk.wav",
     chunk_id: int = 0,
     history: list[str] | None = None,
     enable_space_c: bool | None = None,
-) -> ChunkAnalysis:
+    overall_topic: str = "",
+    curriculum_context: str = "",
+    key_concepts: list[str] | None = None,
+) -> tuple[ChunkAnalysis, bool]:
     """Forward one utterance's audio to the ml-service and parse the ChunkAnalysis."""
-    data: dict[str, str] = {"chunk_id": str(chunk_id), "history": json.dumps(history or [])}
+    data: dict[str, str] = {
+        "chunk_id": str(chunk_id),
+        "history": json.dumps(history or []),
+        "overall_topic": overall_topic,
+        "curriculum_context": curriculum_context,
+        "key_concepts": json.dumps(key_concepts or []),
+    }
     if enable_space_c is not None:
         data["enable_space_c"] = str(enable_space_c).lower()
     files = {"audio": (filename, audio, "audio/wav")}
@@ -41,12 +50,35 @@ async def analyze_audio(
             resp = await http.post(url, data=data, files=files)
         resp.raise_for_status()
     except (httpx.HTTPError, httpx.TimeoutException) as e:
-        return _neutral(chunk_id, repr(e))
+        return _neutral(chunk_id, repr(e)), True
 
     try:
-        return ChunkAnalysis.model_validate(resp.json())
+        return ChunkAnalysis.model_validate(resp.json()), False
     except (ValueError, KeyError) as e:
-        return _neutral(chunk_id, f"bad payload: {e!r}")
+        return _neutral(chunk_id, f"bad payload: {e!r}"), True
+
+
+async def analyze_audio(
+    audio: bytes,
+    filename: str = "chunk.wav",
+    chunk_id: int = 0,
+    history: list[str] | None = None,
+    enable_space_c: bool | None = None,
+    overall_topic: str = "",
+    curriculum_context: str = "",
+    key_concepts: list[str] | None = None,
+) -> ChunkAnalysis:
+    analysis, _ = await analyze_audio_with_status(
+        audio,
+        filename=filename,
+        chunk_id=chunk_id,
+        history=history,
+        enable_space_c=enable_space_c,
+        overall_topic=overall_topic,
+        curriculum_context=curriculum_context,
+        key_concepts=key_concepts,
+    )
+    return analysis
 
 
 async def health() -> dict:

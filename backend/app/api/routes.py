@@ -1,16 +1,20 @@
 """HTTP surface. Thin — orchestration lives in agents/ and pipeline/. Open /docs to poke it."""
-import json
+import time
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
+from .forms import json_string_list
 from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
 from ..confusion import client, engine
+from ..config import settings
 from ..fusion import fuse
 from ..pipeline.filter import filter_questions
 from ..pipeline.scoring import score_ensemble
 from ..schemas import (
+    AnalysisJob,
+    AnalysisStatusResponse,
     AnswerRequest,
     ChunkAnalysis,
     ChunkQuestionResponse,
@@ -20,6 +24,7 @@ from ..schemas import (
     QAEntry,
     RunResult,
     Segment,
+    SessionSnapshot,
     TargetedQuestion,
     TeachTurnRequest,
     TeachTurnResponse,
@@ -31,7 +36,11 @@ router = APIRouter()
 
 @router.get("/health")
 async def health() -> dict:
-    return {"ok": True}
+    return {
+        "ok": True,
+        "llm_configured": bool(settings.student_api_key and settings.generator_api_key),
+        "store_backend": settings.store_backend,
+    }
 
 
 @router.post("/teach/turn", response_model=TeachTurnResponse)
@@ -42,8 +51,7 @@ async def teach_turn(req: TeachTurnRequest) -> TeachTurnResponse:
     return resp
 
 
-@router.post("/measure", response_model=RunResult)
-async def measure(session_id: str) -> RunResult:
+async def _measure_session(session_id: str) -> RunResult:
     """Run the full transfer-delta measurement on a stored transcript.
 
     generate (with answer keys) -> filter (cold student) -> ensemble score -> delta.
@@ -60,6 +68,113 @@ async def measure(session_id: str) -> RunResult:
     return result
 
 
+async def _set_class_analysis_status(
+    session_id: str, status: str, error: str | None = None
+) -> None:
+    """Mirror an analysis job onto its durable class progress when the session is path:class."""
+    if ":" not in session_id:
+        return
+    path_id, class_id = session_id.split(":", 1)
+    try:
+        memory = await store.get_memory(path_id)
+    except KeyError:
+        return
+    progress = memory.class_progress.get(class_id)
+    if progress is None:
+        return
+    progress.analysis_status = status
+    progress.analysis_error = error
+    memory.class_progress[class_id] = progress
+    await store.update_memory(path_id, memory)
+
+
+@router.post("/measure", response_model=RunResult)
+async def measure(session_id: str) -> RunResult:
+    return await _measure_session(session_id)
+
+
+async def _run_analysis_job(session_id: str) -> None:
+    await _set_class_analysis_status(session_id, "running")
+    await store.set_analysis_job(AnalysisJob(
+        session_id=session_id, status="running", updated_at=time.time()
+    ))
+    try:
+        await _measure_session(session_id)
+        await store.set_analysis_job(AnalysisJob(
+            session_id=session_id, status="complete", updated_at=time.time()
+        ))
+        await _set_class_analysis_status(session_id, "complete")
+    except Exception as exc:
+        error = str(exc)[:500]
+        await store.set_analysis_job(AnalysisJob(
+            session_id=session_id,
+            status="failed",
+            error=error,
+            updated_at=time.time(),
+        ))
+        await _set_class_analysis_status(session_id, "failed", error)
+
+
+@router.post("/analysis/{session_id}", response_model=AnalysisJob, status_code=202)
+async def analysis_start(session_id: str, background_tasks: BackgroundTasks) -> AnalysisJob:
+    if not await store.get_transcript(session_id):
+        raise HTTPException(404, f"no transcript for session {session_id!r}")
+    current = await store.get_analysis_job(session_id)
+    if current and current.status in {"pending", "running", "complete"}:
+        return current
+    job = AnalysisJob(session_id=session_id, status="pending", updated_at=time.time())
+    await store.set_analysis_job(job)
+    await _set_class_analysis_status(session_id, "pending")
+    background_tasks.add_task(_run_analysis_job, session_id)
+    return job
+
+
+@router.get("/analysis/{session_id}", response_model=AnalysisStatusResponse)
+async def analysis_status(session_id: str) -> AnalysisStatusResponse:
+    job = await store.get_analysis_job(session_id)
+    run = await store.get_run(session_id)
+    if job is None and run is None:
+        raise HTTPException(404, f"no analysis job for session {session_id!r}")
+    if job is None:
+        job = AnalysisJob(session_id=session_id, status="complete", updated_at=time.time())
+    analyses = await store.get_analyses(session_id)
+    fusion_result = None
+    if analyses or run is not None:
+        fusion_result = fuse(
+            session_id,
+            analyses,
+            await store.get_scores(session_id),
+            run.per_question if run else [],
+        )
+    return AnalysisStatusResponse(**job.model_dump(), run=run, fusion=fusion_result)
+
+
+@router.get("/sessions/{session_id}", response_model=SessionSnapshot)
+async def session_snapshot(session_id: str) -> SessionSnapshot:
+    transcript = await store.get_transcript(session_id)
+    analyses = await store.get_analyses(session_id)
+    questions = await store.get_history(session_id)
+    run = await store.get_run(session_id)
+    if not transcript and not analyses and not questions and run is None:
+        raise HTTPException(404, f"unknown session {session_id!r}")
+    fusion_result = None
+    if analyses or run is not None:
+        fusion_result = fuse(
+            session_id,
+            analyses,
+            await store.get_scores(session_id),
+            run.per_question if run else [],
+        )
+    return SessionSnapshot(
+        session_id=session_id,
+        transcript=transcript,
+        analyses=analyses,
+        questions=questions,
+        run=run,
+        fusion=fusion_result,
+    )
+
+
 # ---- confusion-driven targeted questioning ----
 
 @router.get("/confusion/health")
@@ -74,16 +189,15 @@ async def confusion_analyze(
     chunk_id: int = Form(0),
     history: str = Form("[]"),          # JSON array of prior transcripts (Space B context)
     enable_space_c: bool | None = Form(None),
+    overall_topic: str = Form(""),
+    curriculum_context: str = Form(""),
+    key_concepts: str = Form("[]"),
     audio: UploadFile = File(...),
 ) -> ChunkAnalysis:
     """Forward a recorded utterance to the ml-service confusion engine and store the analysis.
     If `history` is empty, the session's prior segment texts are used as Space B context.
     Degrades to a neutral analysis if the ml-service is unreachable (see confusion/client.py)."""
-    try:
-        hist = json.loads(history) if history else []
-        hist = [str(h) for h in hist] if isinstance(hist, list) else []
-    except json.JSONDecodeError:
-        hist = []
+    hist = json_string_list(history)
     if not hist:
         hist = [s.text for s in await store.get_transcript(session_id)]
 
@@ -91,6 +205,9 @@ async def confusion_analyze(
     analysis = await client.analyze_audio(
         audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
         history=hist, enable_space_c=enable_space_c,
+        overall_topic=overall_topic,
+        curriculum_context=curriculum_context,
+        key_concepts=json_string_list(key_concepts),
     )
     await store.append_analysis(session_id, analysis)
     return analysis
@@ -102,6 +219,8 @@ async def questions_from_chunk(
     chunk_id: int = Form(0),
     topic: str | None = Form(None),
     history: str = Form("[]"),          # JSON array of prior transcripts (Space B context)
+    curriculum_context: str = Form(""),
+    key_concepts: str = Form("[]"),
     enable_space_c: bool | None = Form(False),   # Space C (fact-check) off by default — its
                                                   # pedantic factual_errors false-positive on
                                                   # correct speech; pass true to re-enable.
@@ -115,11 +234,7 @@ async def questions_from_chunk(
     Space C (fact-check) is off by default for this flow (its factual_errors false-positive on
     correct speech). The AI students stay silent; the question is the output. Degrades to a neutral
     analysis (`asked=False`) if the ml-service is unreachable."""
-    try:
-        hist = json.loads(history) if history else []
-        hist = [str(h) for h in hist] if isinstance(hist, list) else []
-    except json.JSONDecodeError:
-        hist = []
+    hist = json_string_list(history)
     if not hist:
         hist = [a.text for a in await store.get_analyses(session_id)] or [
             s.text for s in await store.get_transcript(session_id)
@@ -129,12 +244,27 @@ async def questions_from_chunk(
     analysis = await client.analyze_audio(
         audio_bytes, filename=audio.filename or "chunk.wav", chunk_id=chunk_id,
         history=hist, enable_space_c=enable_space_c,
+        overall_topic=topic or "",
+        curriculum_context=curriculum_context,
+        key_concepts=json_string_list(key_concepts),
     )
     await store.append_analysis(session_id, analysis)
 
     if topic:
         await store.set_topic(session_id, topic)
     topic = topic or await store.get_topic(session_id)
+
+    if analysis.student_question and analysis.student_question.question_text.strip():
+        generated = analysis.student_question
+        question = TargetedQuestion(
+            id=await store.next_question_id(session_id),
+            chunk_id=analysis.chunk_id,
+            text=generated.question_text.strip(),
+            anomaly_type=generated.anomaly_type,
+            rationale=f"GPU confusion signal on {generated.target_concept}",
+        )
+        await store.record_questions(session_id, [question])
+        return ChunkQuestionResponse(asked=True, analysis=analysis, question=question)
 
     if not engine.is_confused(analysis):
         return ChunkQuestionResponse(asked=False, analysis=analysis, question=None)

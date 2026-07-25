@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none" shape-rendering="crispEdges">
+  <path d="M5 5V25L10 21L15 31L20 28L15 19H25L5 5Z" fill="#8E8E8E" />
+  <path d="M2 2V22L7 18L12 28L17 25L12 16H22L2 2Z" fill="#050505" stroke="#FFFFFF" stroke-width="4" stroke-linecap="square" stroke-linejoin="miter" />
+  <path d="M2 2V22L7 18L12 28L17 25L12 16H22L2 2Z" fill="#050505" stroke="#050505" stroke-width="1" stroke-linecap="square" stroke-linejoin="miter" />
+</svg>
