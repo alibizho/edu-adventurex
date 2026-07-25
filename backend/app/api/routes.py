@@ -1,9 +1,9 @@
 """HTTP surface. Thin — orchestration lives in agents/ and pipeline/. Open /docs to poke it."""
-import json
 import time
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
+from .forms import json_string_list
 from ..agents.generator import generate_questions
 from ..agents.student import student_turn
 from ..agents.targeted import generate_targeted_questions
@@ -32,14 +32,6 @@ from ..schemas import (
 from ..store import store
 
 router = APIRouter()
-
-
-def _json_string_list(raw: str) -> list[str]:
-    try:
-        parsed = json.loads(raw) if raw else []
-    except json.JSONDecodeError:
-        return []
-    return [str(item) for item in parsed] if isinstance(parsed, list) else []
 
 
 @router.get("/health")
@@ -205,7 +197,7 @@ async def confusion_analyze(
     """Forward a recorded utterance to the ml-service confusion engine and store the analysis.
     If `history` is empty, the session's prior segment texts are used as Space B context.
     Degrades to a neutral analysis if the ml-service is unreachable (see confusion/client.py)."""
-    hist = _json_string_list(history)
+    hist = json_string_list(history)
     if not hist:
         hist = [s.text for s in await store.get_transcript(session_id)]
 
@@ -215,7 +207,7 @@ async def confusion_analyze(
         history=hist, enable_space_c=enable_space_c,
         overall_topic=overall_topic,
         curriculum_context=curriculum_context,
-        key_concepts=_json_string_list(key_concepts),
+        key_concepts=json_string_list(key_concepts),
     )
     await store.append_analysis(session_id, analysis)
     return analysis
@@ -242,7 +234,7 @@ async def questions_from_chunk(
     Space C (fact-check) is off by default for this flow (its factual_errors false-positive on
     correct speech). The AI students stay silent; the question is the output. Degrades to a neutral
     analysis (`asked=False`) if the ml-service is unreachable."""
-    hist = _json_string_list(history)
+    hist = json_string_list(history)
     if not hist:
         hist = [a.text for a in await store.get_analyses(session_id)] or [
             s.text for s in await store.get_transcript(session_id)
@@ -254,7 +246,7 @@ async def questions_from_chunk(
         history=hist, enable_space_c=enable_space_c,
         overall_topic=topic or "",
         curriculum_context=curriculum_context,
-        key_concepts=_json_string_list(key_concepts),
+        key_concepts=json_string_list(key_concepts),
     )
     await store.append_analysis(session_id, analysis)
 

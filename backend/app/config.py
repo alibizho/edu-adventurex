@@ -59,5 +59,15 @@ class Settings(BaseSettings):
     # --- Learning plan (curriculum). Default number of classes when scope/build don't decide one. ---
     default_classes: int = 5
 
+    # --- Objective mastery. How many new utterances to accumulate before judging which class
+    #     objectives they covered: one verifier call per check, so this is the cost/latency dial.
+    #     Checking every chunk would undo the saving that makes continuous teaching affordable. ---
+    objective_check_every: int = 3
+    # Turns to wait before a student may again nudge the learner toward an uncovered objective.
+    # This is what stops a clear utterance producing no reaction at all, so it is short: the room
+    # steers roughly every other turn. Raise it if the class feels naggy, lower it to 1 to have a
+    # student respond to almost everything.
+    goal_probe_cooldown: int = 2
+
 
 settings = Settings()

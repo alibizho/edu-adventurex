@@ -12,6 +12,10 @@ services:
       POSTGRES_USER: ts
       POSTGRES_PASSWORD: ts
       POSTGRES_DB: teachable
+    ports:
+      # Published so you can run just the DB (`docker compose up -d db`) and keep the backend
+      # local with --reload. Without this the DB is only reachable on the compose network.
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

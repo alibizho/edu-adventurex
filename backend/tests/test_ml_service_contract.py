@@ -29,11 +29,32 @@ def _field_contract(model: type) -> dict[str, tuple[bool, object, object]]:
     }
 
 
-def test_gpu_and_main_backend_schemas_share_the_same_contract():
+def test_every_field_the_gpu_sends_is_read_the_same_way_by_the_backend():
+    """The wire invariant, which is a subset relation rather than equality.
+
+    Everything the GPU emits must land on an identically-shaped backend field — same
+    required-ness, same default. The backend may carry *extra* fields the GPU never sends:
+    `prosody` is measured in the browser and `gpu_confidence` is written after fusion, so
+    requiring the GPU's schema to declare them would be a lie about what the box produces.
+    """
     for model_name in CONTRACT_MODELS:
-        gpu_model = getattr(gpu_schemas, model_name)
-        app_model = getattr(app_schemas, model_name)
-        assert _field_contract(gpu_model) == _field_contract(app_model), model_name
+        gpu_fields = _field_contract(getattr(gpu_schemas, model_name))
+        app_fields = _field_contract(getattr(app_schemas, model_name))
+        missing = set(gpu_fields) - set(app_fields)
+        assert not missing, f"{model_name}: backend cannot read {sorted(missing)}"
+        for name, shape in gpu_fields.items():
+            assert app_fields[name] == shape, f"{model_name}.{name} disagrees"
+
+
+def test_backend_only_fields_are_optional_so_a_gpu_payload_still_validates():
+    """The corollary: the extra backend fields must never be required, or every real response
+    from the box would fail validation."""
+    gpu_only = set(_field_contract(app_schemas.ChunkAnalysis)) - set(
+        _field_contract(gpu_schemas.ChunkAnalysis)
+    )
+    assert gpu_only == {"prosody", "gpu_confidence"}
+    for name in gpu_only:
+        assert not app_schemas.ChunkAnalysis.model_fields[name].is_required()
 
 
 def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():

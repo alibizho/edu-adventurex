@@ -295,15 +295,34 @@ in this path.
 
 ## `POST /plan/{path_id}/class/{class_id}/teach/audio-turn` — context-aware audio turn
 
-Send one recorded utterance as multipart form-data (`audio`, optional `chunk_id` and `history`).
-The route automatically supplies the GPU service with the current path topic, class objective,
-teacher notes, source-material summary, covered concepts, and previously expanded concepts.
+Send one recorded utterance as multipart form-data (`audio`, optional `chunk_id`, `history` and
+`silent`). The route automatically supplies the GPU service with the current path topic, class
+objective, teacher notes, source-material summary, covered concepts, and previously expanded
+concepts.
 
 The response contains the saved transcript segment and full `ChunkAnalysis`. When the GPU returns
 `student_question`, that question becomes the AI Student reply and is added to cross-class question
 memory. When it returns `curriculum_update.added_concepts`, those concepts are persisted in
 `PathMemory.expanded_concepts` and included in later turns. If the GPU service is unavailable, the
 response explicitly sets `degraded: true` and does not fabricate a transcript or question.
+
+### `silent` — the live classroom
+
+`silent=true` is how the frontend teaches continuously. The learner talks without stopping and every
+natural pause ships a chunk, so the utterance is still transcribed, stored as a segment and analyzed
+— but the class only speaks when a question actually fires:
+
+| | question fired | no question |
+|---|---|---|
+| `silent=false` (default) | `student_reply` = the question | `student_reply` = an LLM reply |
+| `silent=true` | `student_reply` = the question | `student_reply = ""`, **no LLM call** |
+
+Without it every pause costs a reply round-trip and the class ends up several sentences behind the
+teacher. The transcript is identical either way, so the end-of-class `/analysis/{session_id}`
+measurement is unaffected — which is exactly why the segment is recorded even when nobody speaks.
+
+Use `silent=false` for a one-to-one exchange, where a student asked something and is expected to
+answer back.
 
 ---
 

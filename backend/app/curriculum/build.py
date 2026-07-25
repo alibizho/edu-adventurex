@@ -20,6 +20,7 @@ from ..config import settings
 from ..llm_lc import generator_llm
 from ..schemas import (
     BuildPlanRequest,
+    ClassObjective,
     ClassUnit,
     GrowthPath,
     PathMemory,
@@ -33,6 +34,9 @@ class _ClassDraft(BaseModel):
     class_id: str
     title: str
     objective: str
+    # The checkable breakdown of `objective`. Asked for in the same structuring call rather than a
+    # follow-up, so goals cost nothing extra to produce.
+    objectives: list[str] = Field(default_factory=list)
     difficulty: str = "beginner"
     prerequisites: list[str] = Field(default_factory=list)
 
@@ -115,6 +119,11 @@ async def structure_curriculum(
             class_id=c.class_id,
             title=c.title,
             objective=c.objective,
+            objectives=[
+                ClassObjective(id=f"o{i}", text=text.strip())
+                for i, text in enumerate(c.objectives, start=1)
+                if text.strip()
+            ],
             difficulty=c.difficulty,
             prerequisites=c.prerequisites,
         )

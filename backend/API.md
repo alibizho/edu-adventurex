@@ -80,7 +80,7 @@ transferred and fuses it with the confusion signal.
 | POST | `/teach/turn` | JSON `TeachTurnRequest` | `TeachTurnResponse` | One teaching turn → student reply + new segment. |
 | POST | `/questions/from_chunk` | multipart form | `ChunkQuestionResponse` | **Flow A:** audio chunk → (maybe) a question. |
 | POST | `/confusion/analyze` | multipart form | `ChunkAnalysis` | Audio chunk → analysis, optional GPU question, and curriculum update. |
-| POST | `/plan/{path_id}/class/{class_id}/teach/audio-turn` | multipart form | `AudioClassTeachResponse` | Context-aware audio teaching turn used by the frontend. |
+| POST | `/plan/{path_id}/class/{class_id}/teach/audio-turn` | multipart form | `AudioClassTeachResponse` | Context-aware audio teaching turn used by the frontend. `silent=true` records + analyzes the chunk but only speaks to ask (see LEARN_BY_TEACHING.md). |
 | POST | `/confusion/ingest` | JSON `IngestRequest` | `{session_id, n_chunks}` | Bulk-store precomputed analyses. |
 | POST | `/confusion/mock` | `?session_id=` | `{session_id, n_chunks}` | Text-only heuristic analyses (no GPU). |
 | POST | `/measure` | `?session_id=` | `RunResult` | Transfer-delta measurement (slow). |

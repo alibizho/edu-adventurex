@@ -13,9 +13,9 @@
 Thin — the LLM work lives in app/curriculum/, memory + reuse of the confusion/targeted pipeline in
 app/curriculum/teaching.py.
 """
-import json
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from .forms import json_string_list
 
 from ..curriculum.build import (
     CurriculumGenerationError,
@@ -23,8 +23,13 @@ from ..curriculum.build import (
     generate_class_notes,
     scope_topic,
 )
-from ..confusion import client
-from ..curriculum.teaching import class_audio_turn, class_teach_turn, end_class
+from ..confusion import client, engine
+from ..curriculum.teaching import (
+    class_audio_turn,
+    class_teach_turn,
+    end_class,
+    run_objective_check,
+)
 from ..schemas import (
     AudioClassTeachResponse,
     BuildPlanRequest,
@@ -34,6 +39,7 @@ from ..schemas import (
     GrowthPath,
     PathMemory,
     ScopeRequest,
+    SpeechProsody,
     TeachTurnBody,
     TopicScope,
 )
@@ -99,11 +105,19 @@ async def plan_memory(path_id: str) -> PathMemory:
 
 
 @router.post("/{path_id}/class/{class_id}/notes", response_model=ClassUnit)
-async def class_notes(path_id: str, class_id: str) -> ClassUnit:
+async def class_notes(path_id: str, class_id: str, regenerate: bool = False) -> ClassUnit:
     """Generate the teacher's notes (Markdown) for this class, memory-aware so it doesn't repeat
-    earlier classes. Persisted onto the plan and returned."""
+    earlier classes. Persisted onto the plan and returned.
+
+    Already-generated notes are returned as-is: this is the expensive call in the whole plan
+    surface, and re-entering a class shouldn't rewrite (and re-bill) its primer. Pass
+    `?regenerate=true` to rebuild deliberately — worth doing once cross-class memory has moved on
+    and the primer should stop re-teaching what the learner has since covered.
+    """
     path = await _load_path(path_id)
     cls = _find_class(path, class_id)
+    if cls.notes_generated and cls.teacher_notes.strip() and not regenerate:
+        return cls
     memory = await store.get_memory(path_id)
     cls.teacher_notes = await generate_class_notes(path, cls, memory)
     cls.notes_generated = True
@@ -127,8 +141,18 @@ async def class_teach(path_id: str, class_id: str, body: TeachTurnBody) -> Class
 async def class_teach_audio(
     path_id: str,
     class_id: str,
+    background_tasks: BackgroundTasks,
     chunk_id: int = Form(0),
     history: str = Form("[]"),
+    silent: bool = Form(False),   # live classroom: record + analyze, but only speak to ask.
+    # Browser-measured delivery. The GPU scores hesitation relative to the same utterance and so
+    # can't see speech that's unsure throughout; these are absolute (see SpeechProsody).
+    speech_ms: int = Form(0),
+    total_ms: int = Form(0),
+    pause_count: int = Form(0),
+    longest_pause_ms: int = Form(0),
+    mean_level: float = Form(0.0),
+    peak_level: float = Form(0.0),
     audio: UploadFile = File(...),
 ) -> AudioClassTeachResponse:
     path = await _load_path(path_id)
@@ -136,11 +160,7 @@ async def class_teach_audio(
     audio_bytes = await audio.read()
     if len(audio_bytes) > 15 * 1024 * 1024:
         raise HTTPException(413, "audio chunk exceeds 15 MB")
-    try:
-        parsed = json.loads(history) if history else []
-        parsed_history = [str(item) for item in parsed] if isinstance(parsed, list) else []
-    except json.JSONDecodeError:
-        parsed_history = []
+    parsed_history = json_string_list(history)
 
     memory = await store.get_memory(path_id)
     curriculum_context = "\n\n".join(
@@ -163,7 +183,18 @@ async def class_teach_audio(
         curriculum_context=curriculum_context,
         key_concepts=key_concepts,
     )
-    return await class_audio_turn(path_id, class_id, cls, analysis, degraded)
+    if total_ms > 0:
+        engine.fuse_prosody(analysis, SpeechProsody(
+            speech_ms=speech_ms, total_ms=total_ms, pause_count=pause_count,
+            longest_pause_ms=longest_pause_ms, mean_level=mean_level, peak_level=peak_level,
+        ))
+
+    result = await class_audio_turn(path_id, class_id, cls, analysis, degraded, silent=silent)
+    # Objective coverage is judged after the response goes out, batched over several utterances —
+    # the learner is still talking and must not wait on a verifier call.
+    if not result.degraded:
+        background_tasks.add_task(run_objective_check, path_id, class_id, cls)
+    return result
 
 
 @router.post("/{path_id}/class/{class_id}/end", response_model=PathMemory)
