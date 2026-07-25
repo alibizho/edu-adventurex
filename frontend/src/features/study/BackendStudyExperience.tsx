@@ -19,9 +19,8 @@ import { Classroom } from "./components/Classroom";
 import { MarkdownNotes } from "./components/MarkdownNotes";
 import { ModuleBanner } from "./components/ModuleBanner";
 import { SessionExitScene } from "./components/SessionExitScene";
-import { StudentSidebar } from "./components/StudentSidebar";
 import { useContinuousRecorder, type SpeechProsody } from "./useContinuousRecorder";
-import type { StudyModule, StudyToolId } from "./study.types";
+import type { StudyModule } from "./study.types";
 
 const TOOLS = [
   { id: "map", label: "Map" },
@@ -83,7 +82,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const [isBusy, setIsBusy] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
@@ -194,12 +192,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
           setLastConfidence(response.analysis.confidence);
           setTranscript((current) => [...current, heard]);
           setTurnCount((current) => current + 1);
-          const expanded = response.analysis.curriculum_update?.added_concepts ?? [];
-          if (expanded.length > 0) setToolMessage(`CURRICULUM EXPANDED: ${expanded.join(", ").toUpperCase()}`);
-          else if (response.analysis.anomalies.length > 0) {
-            setToolMessage(`LIVE ANALYSIS: ${response.analysis.anomalies.map(({ type }) => type.replaceAll("_", " ")).join(" / ").toUpperCase()}`);
-          } else setToolMessage("LIVE ANALYSIS: EXPLANATION CLEAR.");
-
           if (response.asked && response.question) raiseHand(response.question);
           // Every chunk now triggers a coverage check on the backend. Refresh per chunk rather
           // than once the whole queue empties: while the teacher keeps talking the queue may not
@@ -360,19 +352,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     navigate(`${ROUTES.summary}?path=${encodeURIComponent(pathId)}&class=${encodeURIComponent(classId)}`, { replace: true });
   }, [classId, navigate, pathId]);
 
-  function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "map") {
-      navigate(ROUTES.map);
-      return;
-    }
-    if (toolId === "tutorial") {
-      setToolMessage("TIP: EXPLAIN THE IDEA IN YOUR OWN WORDS, THEN PAUSE.");
-      return;
-    }
-    setPhase("reading");
-    setToolMessage("LOCAL VIEW RESET. BACKEND HISTORY IS RETAINED.");
-  }
-
   function toggleMic() {
     if (recorder.isArmed) recorder.disarm();
     else void recorder.arm();
@@ -416,14 +395,10 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
         />
       ) : (
         <>
+          {/* No sidebar. It carried an AI-STUDENT card with a readiness bar, and Map / Tutorial /
+              Reset — a duplicate of the header's MAP, a tip, and a button that reset only the
+              local view. None of it belongs beside the material you are here to read. */}
           <main className="study-layout">
-            <StudentSidebar
-              student={{ name: isZoom && zoomSeat ? seatName(zoomSeat) : "AI STUDENT", readiness }}
-              tools={TOOLS}
-              message={toolMessage}
-              onToolAction={handleToolAction}
-              avatarVariant={isZoom ? "student" : "robot"}
-            />
             <section className={isZoom ? "conversation-canvas" : "study-canvas halftone-screen"}>
               {isZoom && zoomHand ? (
                 <BackendTeachingWorkspace
