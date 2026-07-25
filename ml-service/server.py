@@ -84,6 +84,9 @@ async def analyze(
     overall_topic: str = Form(""),           # ---- curriculum grounding: what's being taught, the
     curriculum_context: str = Form(""),      #      objective + notes + material, and the concepts
     key_concepts: str = Form("[]"),          #      already covered. Drives Space C + the question.
+    # The concept the learner keeps stumbling over, tracked by the backend's struggle ledger. This
+    # service is stateless per request, so a cross-utterance focus can only arrive from the caller.
+    focus_target: str = Form(""),
     audio: UploadFile = File(...),
 ) -> ChunkAnalysis:
     """Analyze one spoken utterance -> ChunkAnalysis (backend contract)."""
@@ -122,6 +125,7 @@ async def analyze(
                 overall_topic.strip(),
                 curriculum_context.strip(),
                 _json_string_list(key_concepts),
+                focus_target.strip(),
             )
     finally:
         # The box has a 20 GB quota — a leaked temp WAV per request fills it.
