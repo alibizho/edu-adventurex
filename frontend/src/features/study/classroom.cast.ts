@@ -4,13 +4,15 @@ import { SEATS, type SeatId } from "./classroom.seats";
 /**
  * Who is actually sitting in the room this session.
  *
- * The classroom art draws six identical stick figures, so a raised hand belonged to a name and
- * nothing else — every `?` looked the same, and the student you zoomed into was the same generic
- * body every time. Each seat now draws a sprite, dealt once and held for the rest of the session:
- * the face in the `?` bubble is the face you meet up close, and it is still that face when you
- * come back to the room.
+ * Clicking a `?` used to zoom in on the same generic body no matter whose hand it was, so the six
+ * students were six names attached to one person. Each seat now draws its own sprite, dealt once
+ * and held for the rest of the session — MILA is the same student every time you answer her, and
+ * still is after a reload.
  *
- * Dealt randomly rather than hardcoded so the room isn't the same six people in every class.
+ * The room itself is unchanged: the marker over a seat stays a plain `?`. This is only about who
+ * is waiting when the camera arrives.
+ *
+ * Dealt randomly rather than hardcoded so the class isn't the same six people every time.
  */
 const SPRITES: readonly string[] = [1, 2, 3, 4, 5].map((n) => `/images/students/${n}.png`);
 

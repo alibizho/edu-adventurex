@@ -14,6 +14,7 @@ os.environ["ML_SERVICE_URL"] = "http://127.0.0.1:9"  # unreachable -> neutral de
 
 from app.curriculum import teaching  # noqa: E402
 from app.schemas import (  # noqa: E402
+    ChunkAnalysis,
     ClassUnit,
     GrowthPath,
     PathMemory,
@@ -146,6 +147,97 @@ def test_hedged_utterance_asks_and_memory_spans_classes(monkeypatch):
     ))
     assert r2.asked is True
     assert q1 in seen[-1], "cross-class asked question should be injected into question history"
+
+
+def _stub_conversation(monkeypatch, *, correct: bool, follow_up_key: str | None = None):
+    """Stub the one-to-one path: a verifier with a fixed verdict, a follow-up generator, and an
+    explainer that says unmistakably that it gave up asking.
+
+    `follow_up_key` decides whether the follow-ups are gradable, which is what picks the cap the
+    thread is measured against — a keyed root followed by keyless probes is a different thread.
+    """
+    async def fake_grade(answer, question):
+        return correct, False
+
+    async def fake_explain(question, topic="", transcript="", objectives=None):
+        return "HERE IS THE ANSWER"
+
+    async def fake_follow_up(chunks, history, start_id=0, topic=None, transcript="",
+                             focus_target="", parent_id=None, objectives=None):
+        return [TargetedQuestion(id=start_id, chunk_id=0, text="but why does that happen?",
+                                 answer_key=follow_up_key, parent_id=parent_id)]
+
+    monkeypatch.setattr(teaching, "grade_answer", fake_grade)
+    monkeypatch.setattr(teaching, "explain_answer", fake_explain)
+    monkeypatch.setattr(teaching, "generate_targeted_questions", fake_follow_up)
+
+
+def _answer_once(path_id: str, cls: ClassUnit, question_id: int, answer: str):
+    return run(teaching.class_audio_turn(
+        path_id, cls.class_id, cls,
+        ChunkAnalysis(chunk_id=0, text=answer, confidence=0.8),
+        degraded=False, silent=False, answering_question_id=question_id,
+    ))
+
+
+def test_a_keyless_question_gets_a_follow_up_before_it_is_answered_for_you(monkeypatch):
+    """A wrong answer to a question with no answer key must press once, not end the conversation.
+
+    The turn counter is read after this answer is recorded, so it already includes it. Comparing
+    it against "one turn" closed the exchange on the learner's very first reply: the student
+    answered its own question and the `?` disappeared, with no way to try again.
+    """
+    _stub_conversation(monkeypatch, correct=False)
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
+    run(store.save_path(_path("gp-keyless", c1, topic="Physics")))
+    sid = teaching.class_session_id("gp-keyless", "c1")
+    # No answer_key: a GPU-relayed question, which the verifier can never mark correct.
+    run(store.record_questions(sid, [TargetedQuestion(id=0, chunk_id=0, text="what is a wave?")]))
+
+    first = _answer_once("gp-keyless", c1, 0, "uh, it is a thing that moves along")
+    assert first.conversation_over is False, "the first answer must not end the conversation"
+    assert first.question is not None and first.asked is True
+    assert first.student_reply == "but why does that happen?"
+
+    # The second wrong answer is where it stops asking and teaches instead.
+    second = _answer_once("gp-keyless", c1, first.question.id, "still not sure honestly")
+    assert second.conversation_over is True
+    assert second.student_reply == "HERE IS THE ANSWER"
+    assert second.question is None
+
+
+def test_a_correct_answer_still_ends_the_conversation(monkeypatch):
+    _stub_conversation(monkeypatch, correct=True)
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
+    run(store.save_path(_path("gp-correct", c1, topic="Physics")))
+    sid = teaching.class_session_id("gp-correct", "c1")
+    run(store.record_questions(sid, [
+        TargetedQuestion(id=0, chunk_id=0, text="what is a wave?", answer_key="a travelling disturbance"),
+    ]))
+
+    result = _answer_once("gp-correct", c1, 0, "a travelling disturbance that carries energy")
+    assert result.conversation_over is True and result.answer_correct is True
+    assert result.question is None
+
+
+def test_a_graded_question_presses_twice_before_answering_itself(monkeypatch):
+    """MAX_CONVERSATION_TURNS is a cap on the whole thread, counted in answers taken."""
+    _stub_conversation(monkeypatch, correct=False, follow_up_key="because it carries energy")
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
+    run(store.save_path(_path("gp-graded", c1, topic="Physics")))
+    sid = teaching.class_session_id("gp-graded", "c1")
+    run(store.record_questions(sid, [
+        TargetedQuestion(id=0, chunk_id=0, text="what is a wave?", answer_key="a travelling disturbance"),
+    ]))
+
+    question_id = 0
+    for attempt in range(teaching.MAX_CONVERSATION_TURNS - 1):
+        result = _answer_once("gp-graded", c1, question_id, f"attempt {attempt}")
+        assert result.conversation_over is False, f"attempt {attempt} should still press"
+        question_id = result.question.id
+
+    last = _answer_once("gp-graded", c1, question_id, "i give up on phrasing this")
+    assert last.conversation_over is True and last.student_reply == "HERE IS THE ANSWER"
 
 
 def test_end_class_folds_memory():

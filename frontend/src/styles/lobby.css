@@ -206,11 +206,16 @@
   .student-question {
     position: absolute;
     z-index: 2;
-    width: clamp(38px, 4vw, 64px);
-    aspect-ratio: 1;
-    padding: 0;
+    width: clamp(40px, 4.4vw, 72px);
+    aspect-ratio: 1.1;
+    display: grid;
+    place-items: center;
+    padding: 0 0 6px;
     border: 4px solid var(--ink);
     background: var(--paper);
+    font-family: var(--font-display);
+    font-size: clamp(30px, 3.6vw, 58px);
+    line-height: 1;
     cursor: pointer;
     transform-origin: bottom center;
     /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
@@ -231,35 +236,6 @@
     80%           { transform: translateY(-10%); }
   }
 
-  /* Head and shoulders. The sprites are full-body and nearly three times taller than they are
-     wide, so anything that fits the whole figure into a 40px bubble is a face two pixels across
-     above a lot of shoes. `cover` from the top crops to the part that identifies them. */
-  .student-question img {
-    width: 100%;
-    height: 100%;
-    display: block;
-    object-fit: cover;
-    object-position: center top;
-    image-rendering: pixelated;
-  }
-
-  /* The marker still has to read as a question, so the `?` stays — pushed out to the corner
-     rather than sitting across the face it is there to introduce. */
-  .student-question-badge {
-    position: absolute;
-    top: -18%;
-    right: -14%;
-    width: 52%;
-    aspect-ratio: 1;
-    display: grid;
-    place-items: center;
-    border: 4px solid var(--ink);
-    background: var(--paper);
-    font-family: var(--font-display);
-    font-size: clamp(17px, 2vw, 32px);
-    line-height: 1;
-  }
-
   .student-question::after {
     content: "";
     position: absolute;
@@ -278,15 +254,8 @@
     color: var(--paper);
   }
 
-  .student-question:hover:not(:disabled)::after,
-  .student-question:hover:not(:disabled) .student-question-badge {
+  .student-question:hover:not(:disabled)::after {
     background: var(--ink);
-    color: var(--paper);
-  }
-
-  /* The sprite is black line art on transparent, which vanishes against the inverted bubble. */
-  .student-question:hover:not(:disabled) img {
-    filter: invert(1);
   }
 
   .student-question:disabled {
@@ -617,11 +586,7 @@
     .student-question {
       width: 34px;
       border-width: 3px;
-    }
-
-    .student-question-badge {
-      border-width: 3px;
-      font-size: 20px;
+      font-size: 26px;
     }
 
     .student-question::after {

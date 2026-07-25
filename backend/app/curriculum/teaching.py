@@ -461,7 +461,18 @@ async def _goal_probe_question(
 # How many times a student presses on one concept before it stops asking and answers instead. A
 # learner who cannot get there in three tries will not get there on the fourth, and by then the
 # questions have stopped being a probe and started being a wall.
+#
+# Both caps count ANSWERS THE THREAD HAS TAKEN, including the one being graded right now — the
+# answer is written to the ledger before the count is read. A cap of N means "the Nth answer is
+# the one we stop asking on".
 MAX_CONVERSATION_TURNS = 3
+
+# The same cap for a question the verifier cannot grade. GPU-relayed questions carry no answer key
+# and grading can only ever return "wrong" for them, so pressing three times is three rounds
+# against a standard nobody can check — one press, then the answer. It must still be more than
+# one: at one, the learner's very first reply ends the exchange, the student answers its own
+# question, and the `?` disappears with no way to try again.
+UNGRADED_CONVERSATION_TURNS = 2
 
 
 async def _conversation_turn(
@@ -496,6 +507,7 @@ async def _conversation_turn(
     # this one gets a single press before we teach rather than three against a standard we can't
     # actually check.
     gradable = bool((question.answer_key or "").strip())
+    cap = MAX_CONVERSATION_TURNS if gradable else UNGRADED_CONVERSATION_TURNS
 
     if correct:
         # Understood: let the ledger decay reflect it, and say so in character.
@@ -503,7 +515,7 @@ async def _conversation_turn(
         return "OH — THAT MAKES SENSE NOW. THANKS!", None, True, True
 
     # They asked for help, or they have spent their tries. Answer the question.
-    if gave_up or turns >= (MAX_CONVERSATION_TURNS if gradable else 1):
+    if gave_up or turns >= cap:
         said = await explain_answer(
             question,
             topic=topic,

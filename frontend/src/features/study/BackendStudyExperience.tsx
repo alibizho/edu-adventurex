@@ -88,8 +88,8 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
 
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
   const sessionId = classSessionId(pathId, classId);
-  // Held here rather than inside Classroom: the room unmounts on every zoom, and the student you
-  // are answering has to still look like the one whose hand you clicked.
+  // Held here rather than inside the zoom view: that view mounts fresh every time a `?` is
+  // clicked, and re-dealing there would hand the same seat a different student each visit.
   const cast = useClassroomCast(sessionId);
 
   // Recording and analysis run at different speeds: a chunk takes seconds to come back and the
@@ -311,7 +311,11 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       }
       return await settleTurn(
         zoomHand, response.analysis.text.trim(), response.student_reply,
-        response.question, response.conversation_over ?? true,
+        response.question,
+        // A follow-up IS the conversation continuing, whatever the flag says. Only fall back to
+        // ending it when there is genuinely nothing left to answer: closing the exchange is the
+        // damaging default, because the `?` goes with it and the question cannot be retried.
+        response.question ? false : response.conversation_over ?? true,
       );
     } catch (caught) {
       setError(apiMessage(caught));
@@ -414,7 +418,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
         <Classroom
           studyModule={visualModule}
           readiness={readiness}
-          cast={cast}
           objectives={classChecklist(unit)}
           coveredObjectives={progress?.covered_objectives ?? []}
           objectiveEvidence={progress?.objective_evidence ?? {}}
