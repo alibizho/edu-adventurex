@@ -7,6 +7,8 @@ type TurnResult = { teacherText: string; studentText: string; isOver: boolean };
 
 type BackendTeachingWorkspaceProps = {
   seatName: string;
+  /** This seat's sprite for the session, so the student you zoomed into is the one you saw. */
+  sprite: string;
   question: TargetedQuestion;
   isBusy: boolean;
   error: string | null;
@@ -28,6 +30,7 @@ type BackendTeachingWorkspaceProps = {
  */
 export function BackendTeachingWorkspace({
   seatName,
+  sprite,
   question,
   isBusy,
   error,
@@ -96,7 +99,7 @@ export function BackendTeachingWorkspace({
   return (
     <section className="conversation-stage conversation-stage--question" aria-label={`Conversation with ${seatName}`}>
       <div className="conversation-character" aria-hidden="true">
-        <img src="/images/wut-student-fullbody.png" alt="" />
+        <img src={sprite} alt="" />
       </div>
 
       <div className="student-speech" role="status" aria-live="polite">

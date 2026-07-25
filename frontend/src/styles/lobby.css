@@ -27,8 +27,18 @@
   .lobby-module-card {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: clamp(16px, 1.45vw, 25px);
     padding: 20px clamp(20px, 1.9vw, 34px);
+    text-align: center;
+  }
+
+  /* Without this the text block is a flex item at its default `min-width: auto`, so it refuses to
+     shrink below the widest line it contains and a long module title walks straight out through
+     the card's right border instead of wrapping inside it. */
+  .lobby-module-card > div {
+    min-width: 0;
+    overflow-wrap: break-word;
   }
 
   .lobby-module-icon {
@@ -52,10 +62,11 @@
     letter-spacing: 1px;
   }
 
+  /* Wraps. `white-space: nowrap` here was what actually broke the card: the topic line set the
+     text block's minimum width, and any topic longer than the card pushed the title out with it. */
   .lobby-module-card p {
     margin: 7px 0 0;
     font-size: clamp(11px, 1vw, 17px);
-    white-space: nowrap;
   }
 
   .lobby-progress-card {
@@ -128,19 +139,17 @@
     outline-offset: 5px;
   }
 
+  /* One shape, whatever the tutorial is doing. Collapsing the drawer used to hand the viewport a
+     taller box, and the scene was re-framed to fill it: the art stretched, and the teacher's desk
+     that the crop had been hiding slid into view. Closing a drawer is not a reason for the
+     classroom to become a different picture — and the seat markers below are positioned as
+     percentages of this box, so a second framing quietly moved every `?` off its student. */
   .classroom-viewport {
     width: 100%;
+    aspect-ratio: 2.42;
     overflow: hidden;
     border: 3px solid var(--ink);
     background: var(--paper);
-  }
-
-  .is-tutorial-open .classroom-viewport {
-    aspect-ratio: 2.42;
-  }
-
-  .is-tutorial-collapsed .classroom-viewport {
-    aspect-ratio: 1.82;
   }
 
   .classroom-scene {
@@ -166,21 +175,15 @@
   .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -4%) scale(2.2); }
   .classroom-scene.is-zooming.focus-front-right { transform: translate(-24%, -6%) scale(2.2); }
 
+  /* `cover`, never `fill`: the art is pixel-drawn at a fixed 1536x1024 and stretching it to an
+     arbitrary box thickens every line unevenly. Cropping keeps the pixels square. */
   .classroom-scene > img {
     width: 100%;
     height: 100%;
     display: block;
-    image-rendering: pixelated;
-  }
-
-  .is-tutorial-open .classroom-scene > img {
     object-fit: cover;
     object-position: center 24%;
-  }
-
-  .is-tutorial-collapsed .classroom-scene > img {
-    object-fit: fill;
-    object-position: center;
+    image-rendering: pixelated;
   }
 
   .classroom-board-copy {
@@ -203,16 +206,11 @@
   .student-question {
     position: absolute;
     z-index: 2;
-    width: clamp(40px, 4.4vw, 72px);
-    aspect-ratio: 1.1;
-    display: grid;
-    place-items: center;
-    padding: 0 0 6px;
+    width: clamp(38px, 4vw, 64px);
+    aspect-ratio: 1;
+    padding: 0;
     border: 4px solid var(--ink);
     background: var(--paper);
-    font-family: var(--font-display);
-    font-size: clamp(30px, 3.6vw, 58px);
-    line-height: 1;
     cursor: pointer;
     transform-origin: bottom center;
     /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
@@ -233,6 +231,35 @@
     80%           { transform: translateY(-10%); }
   }
 
+  /* Head and shoulders. The sprites are full-body and nearly three times taller than they are
+     wide, so anything that fits the whole figure into a 40px bubble is a face two pixels across
+     above a lot of shoes. `cover` from the top crops to the part that identifies them. */
+  .student-question img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center top;
+    image-rendering: pixelated;
+  }
+
+  /* The marker still has to read as a question, so the `?` stays — pushed out to the corner
+     rather than sitting across the face it is there to introduce. */
+  .student-question-badge {
+    position: absolute;
+    top: -18%;
+    right: -14%;
+    width: 52%;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    border: 4px solid var(--ink);
+    background: var(--paper);
+    font-family: var(--font-display);
+    font-size: clamp(17px, 2vw, 32px);
+    line-height: 1;
+  }
+
   .student-question::after {
     content: "";
     position: absolute;
@@ -251,8 +278,15 @@
     color: var(--paper);
   }
 
-  .student-question:hover:not(:disabled)::after {
+  .student-question:hover:not(:disabled)::after,
+  .student-question:hover:not(:disabled) .student-question-badge {
     background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* The sprite is black line art on transparent, which vanishes against the inverted bubble. */
+  .student-question:hover:not(:disabled) img {
+    filter: invert(1);
   }
 
   .student-question:disabled {
@@ -569,12 +603,8 @@
       flex-basis: 42px;
     }
 
-    .is-tutorial-open .classroom-viewport {
+    .classroom-viewport {
       aspect-ratio: 1.55;
-    }
-
-    .is-tutorial-collapsed .classroom-viewport {
-      aspect-ratio: 1.24;
     }
 
     .classroom-board-copy {
@@ -587,7 +617,11 @@
     .student-question {
       width: 34px;
       border-width: 3px;
-      font-size: 26px;
+    }
+
+    .student-question-badge {
+      border-width: 3px;
+      font-size: 20px;
     }
 
     .student-question::after {
@@ -743,19 +777,23 @@
 
   /* --- live teaching controls (mic, level meter, last-heard line) --- */
 
+  /* A column, so the mic sits on the room's centre line with its instruction directly underneath.
+     Side by side, the mic was pushed off-centre by however wide the caption happened to be, and
+     the caption read as a label for something to its left rather than for the button itself. */
   .classroom-controls {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: clamp(12px, 2vw, 28px);
+    gap: clamp(10px, 1.2vw, 16px);
     margin-top: 14px;
   }
 
   .classroom-status {
     display: grid;
     gap: 6px;
-    min-width: min(46ch, 60vw);
+    width: min(60ch, 92vw);
     font-size: clamp(10px, 1.1vw, 14px);
+    text-align: center;
   }
 
   .mic-meter {

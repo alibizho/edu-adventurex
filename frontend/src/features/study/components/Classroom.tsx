@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { PixelMicIcon, PixelReturnIcon } from "../../../components/visuals/PixelIcons";
 import { PixelRobot } from "../../../components/visuals/PixelRobot";
 import type { ClassObjective } from "../../learning-data/backend.types";
+import type { ClassroomCast } from "../classroom.cast";
 import { SEATS, type SeatId } from "../classroom.seats";
 import { formatElapsed, type MeterRef, type RecorderState } from "../usePressToTalkRecorder";
 import type { StudyModule } from "../study.types";
@@ -47,6 +48,8 @@ type LiveSession = {
 type ClassroomProps = {
   studyModule: StudyModule;
   readiness: number;
+  /** Which sprite is sitting in which seat this session (see classroom.cast.ts). */
+  cast: ClassroomCast;
   /** The class's goals, and which of them the learner has demonstrably explained. */
   objectives?: readonly ClassObjective[];
   coveredObjectives?: readonly string[];
@@ -259,6 +262,7 @@ function micCaption(state: RecorderState, isBusy: boolean, queueDepth: number, e
 export function Classroom({
   studyModule,
   readiness,
+  cast,
   objectives = [],
   coveredObjectives = [],
   objectiveEvidence = {},
@@ -295,7 +299,7 @@ export function Classroom({
   const isArmed = live ? live.recorderState !== "idle" : false;
 
   return (
-    <main className={`teaching-lobby ${isTutorialOpen ? "is-tutorial-open" : "is-tutorial-collapsed"}`}>
+    <main className="teaching-lobby">
       <section className="lobby-summary" aria-label="Teaching session overview">
         <div className="lobby-summary-card lobby-module-card">
           <PixelDocumentIcon className="lobby-module-icon" />
@@ -353,7 +357,12 @@ export function Classroom({
               disabled={Boolean(zoomingTo)}
               onClick={() => !zoomingTo && setZoomingTo(seat.id)}
             >
-              ?
+              {/* The bubble is a portrait rather than a bare `?`. The art draws six identical
+                  stick figures, so the sprite is the only thing that says *which* student is
+                  asking — and it is the same one waiting when the camera arrives. The `?` moves
+                  to a badge instead of going away: the marker still has to read as a question. */}
+              <img src={cast[seat.id]} alt="" />
+              <span className="student-question-badge" aria-hidden="true">?</span>
             </button>
           ))}
         </div>

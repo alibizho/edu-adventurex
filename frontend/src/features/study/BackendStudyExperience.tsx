@@ -13,6 +13,7 @@ import {
   type GrowthPath,
   type TargetedQuestion,
 } from "../learning-data/backend.types";
+import { useClassroomCast } from "./classroom.cast";
 import { SEATS, seatName, type SeatId } from "./classroom.seats";
 import { BackendTeachingWorkspace } from "./components/BackendTeachingWorkspace";
 import { Classroom } from "./components/Classroom";
@@ -87,6 +88,9 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
 
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
   const sessionId = classSessionId(pathId, classId);
+  // Held here rather than inside Classroom: the room unmounts on every zoom, and the student you
+  // are answering has to still look like the one whose hand you clicked.
+  const cast = useClassroomCast(sessionId);
 
   // Recording and analysis run at different speeds: a chunk takes seconds to come back and the
   // teacher keeps talking through it. Chunks queue here and drain one at a time — the GPU
@@ -410,6 +414,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
         <Classroom
           studyModule={visualModule}
           readiness={readiness}
+          cast={cast}
           objectives={classChecklist(unit)}
           coveredObjectives={progress?.covered_objectives ?? []}
           objectiveEvidence={progress?.objective_evidence ?? {}}
@@ -445,6 +450,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
               {isZoom && zoomHand ? (
                 <BackendTeachingWorkspace
                   seatName={seatName(zoomHand.seatId)}
+                  sprite={cast[zoomHand.seatId]}
                   question={zoomHand.question}
                   isBusy={isBusy}
                   error={error}
