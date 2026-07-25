@@ -50,6 +50,7 @@ from schemas import (Anomaly, BEYOND, ChunkAnalysis, COGNITIVE_LOAD, CurriculumU
 class ConfusionEngine:
     def __init__(self) -> None:
         self.device = C.DEVICE
+        self._warned_pace = False       # log the dead-pace diagnosis once, not per request
         print(f"[engine] device={self.device}  whisper={C.WHISPER_MODEL}/{C.WHISPER_COMPUTE}  "
               f"space_c={C.ENABLE_SPACE_C}  judge={C.JUDGE_BACKEND}")
         self._load_asr()
@@ -189,7 +190,16 @@ class ConfusionEngine:
 
         sa = self._space_a(y, transcript, words)
         n_w = len(words)
-        red = [i for i, z in enumerate(sa["z"]) if z > C.ZSCORE_ANOMALY and 0 < i < n_w - 1]
+        # Two ways to be a hesitant word, because they catch opposite failures:
+        #   z   — this word stands out against the rest of THIS utterance. Blind to uniform
+        #         confusion: hedge through the whole sentence and nothing is an outlier.
+        #   raw — absolute audio/text dissonance. Catches the utterance that is shaky throughout,
+        #         which is exactly the case the z-score cannot see.
+        red = [
+            i for i in range(n_w)
+            if 0 < i < n_w - 1
+            and (sa["z"][i] > C.ZSCORE_ANOMALY or sa["raw"][i] > C.ABSOLUTE_DISSONANCE)
+        ]
 
         logic = self._space_b(transcript, history)
         fact = self._space_c(transcript, curriculum_context, key_concepts) if use_c else {"verdict": "SKIP"}
@@ -263,10 +273,25 @@ class ConfusionEngine:
 
         # cognitive load: articulation time per character, z-scored across the utterance.
         rate = np.array([max(1e-3, w["end"] - w["start"]) / max(len(w["word"].strip()), 1) for w in words])
-        pm, ps = rate.mean(), max(rate.std(), 1e-6)
-        pace_z = (rate - pm) / ps
 
-        return {"z": z, "raw": word_scores, "pace_z": pace_z, "entropy": entropy_w}
+        # Is that rate telling us anything? When Whisper's word alignment fails, `_transcribe`
+        # falls back to splitting a segment's duration proportionally to word length — which makes
+        # seconds-per-character IDENTICAL for every word by construction. The z-scores then come
+        # out as a row of zeros, which reads downstream as "perfectly even delivery" when the truth
+        # is "we didn't measure it". Detect it from the data rather than from which branch ran,
+        # since alignment can also succeed and return degenerate spans.
+        pace_ok = bool(rate.std() > 1e-4)
+        if not pace_ok and not self._warned_pace:
+            print("[engine] word timings are uniform — pace/cognitive-load signal unavailable. "
+                  "Check that WHISPER_MODEL supports word_timestamps and that WHISPER_COMPUTE "
+                  "isn't crashing model.align().")
+            self._warned_pace = True
+
+        pm, ps = rate.mean(), max(rate.std(), 1e-6)
+        pace_z = (rate - pm) / ps if pace_ok else np.zeros_like(rate)
+
+        return {"z": z, "raw": word_scores, "pace_z": pace_z, "entropy": entropy_w,
+                "pace_ok": pace_ok}
 
     def _pool_to_words(self, per_token, transcript, words, offsets, agg="max"):
         """Aggregate a per-(sub)token array into per-word values by char-span overlap. 'max' lets
@@ -351,11 +376,14 @@ class ConfusionEngine:
     def _build(self, chunk_id, transcript, words, sa, red, logic, fact, history,
                overall_topic, curriculum_context):
         z_scores, pace_z, entropy_w = sa["z"], sa["pace_z"], sa["entropy"]
+        raw = sa["raw"]
+        pace_ok = sa.get("pace_ok", True)
         n = len(words)
 
         e_mean, e_std = entropy_w.mean(), max(entropy_w.std(), 1e-6)
         scattered = entropy_w > (e_mean + 2 * e_std)
-        bottleneck = pace_z > C.PACE_Z_THRESHOLD
+        # No pace measurement means no bottlenecks — not "no bottlenecks found".
+        bottleneck = (pace_z > C.PACE_Z_THRESHOLD) if pace_ok else np.zeros(n, dtype=bool)
 
         anomalies: list[Anomaly] = []
 
@@ -443,10 +471,16 @@ class ConfusionEngine:
             conf -= 0.4
         if fact.get("verdict") == "OFF_TOPIC":
             conf -= 0.5
-        if load_idx:
+        if load_idx and pace_ok:
             conf -= min(0.4, max(pace_z[load_idx]) / 4.0)
         if red:
             conf -= min(0.2, max(z_scores[red]) / 5.0)
+        # Overall shakiness, independent of any outlier. Without this an utterance that is
+        # uniformly unsure scores a clean 1.0, because every penalty above needs something to
+        # stand out — and when you hedge all the way through, nothing does.
+        mean_raw = float(raw.mean()) if n else 0.0
+        if mean_raw > C.ABSOLUTE_DISSONANCE:
+            conf -= min(0.5, (mean_raw - C.ABSOLUTE_DISSONANCE) * 2.0)
         confidence = round(float(min(1.0, max(0.05, conf))), 2)
 
         # BEYOND is not a failure: the learner went past the syllabus and got it right, so the

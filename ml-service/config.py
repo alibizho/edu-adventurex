@@ -79,7 +79,13 @@ JUDGE_MAX_TOKENS = int(os.environ.get("JUDGE_MAX_TOKENS", "300"))
 
 # --- thresholds (were magic numbers in the notebook) ---
 FACT_DISTANCE_THRESHOLD = float(os.environ.get("FACT_DISTANCE_THRESHOLD", "0.45"))
+# Relative: this word stands out against the rest of the same utterance.
 ZSCORE_ANOMALY = float(os.environ.get("ZSCORE_ANOMALY", "2.0"))
+# Absolute: raw audio/text dissonance, needed because the z-score above is blind to an utterance
+# that is uniformly shaky — hedge the whole way through and no single word is an outlier.
+# UNCALIBRATED: the cosine-dissonance scale depends on the trained brain, so tune this against two
+# real recordings (one confident, one hesitant) rather than trusting the default. Lower = stricter.
+ABSOLUTE_DISSONANCE = float(os.environ.get("ABSOLUTE_DISSONANCE", "0.55"))
 # articulation slower than this many SD -> the word took abnormally long to say (bottleneck).
 PACE_Z_THRESHOLD = float(os.environ.get("PACE_Z_THRESHOLD", "1.5"))
 # Cross-modal fusion: text is correct but this share of words carries cognitive load -> the

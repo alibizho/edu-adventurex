@@ -69,6 +69,10 @@ async def health() -> dict:
         "whisper": os.environ.get("WHISPER_MODEL", "configured-at-startup"),
         "space_c": os.environ.get("ENABLE_SPACE_C", "1") == "1",
         "judge": os.environ.get("JUDGE_BACKEND", "local"),
+        # True once an utterance came back with uniform word timings, meaning Whisper's word
+        # alignment is failing and the pace/cognitive-load signal is unavailable. Surfaced here so
+        # the box can be diagnosed from /health instead of needing shell access to read the logs.
+        "pace_degraded": bool(getattr(engine, "_warned_pace", False)),
     }
 
 
