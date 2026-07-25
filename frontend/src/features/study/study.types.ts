@@ -6,7 +6,7 @@ export type StudentStatus = {
   readiness: number;
 };
 
-export type StudyToolId = "progress" | "tutorial" | "reset";
+export type StudyToolId = "map" | "tutorial" | "reset";
 
 export type StudyToolConfig = {
   id: StudyToolId;

@@ -3,7 +3,7 @@
   .study-layout {
     min-height: calc(100vh - var(--header-height) - var(--footer-height));
     display: grid;
-    grid-template-columns: 350px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .student-sidebar { border-right: 5px solid var(--ink); background: var(--paper); }
   .student-card { display: flex; align-items: center; gap: 17px; padding: 20px 13px 10px; }
@@ -23,9 +23,9 @@
   .module-banner {
     position: relative;
     width: min(1030px, 100%);
-    height: 160px;
+    min-height: 160px;
     margin: 0 auto 28px;
-    padding: 22px 30px;
+    padding: 64px 74px 26px;
     display: grid;
     place-items: center;
     background: var(--ink);
@@ -33,7 +33,15 @@
     box-shadow: 6px 6px 0 #777;
   }
   .module-label { position: absolute; left: 28px; top: 27px; font-size: 15px; letter-spacing: 2px; }
-  .module-banner h1 { margin: 24px 0 0; font-family: var(--font-display); font-size: clamp(48px, 5vw, 66px); letter-spacing: 3px; }
+  .module-banner h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3.4vw, 50px);
+    line-height: 1.06;
+    letter-spacing: 3px;
+    text-align: center;
+    text-wrap: balance;
+  }
   .module-banner > svg { position: absolute; right: 28px; top: 28px; }
 
   .document-panel { width: min(1030px, 100%); min-height: 920px; margin: 0 auto; padding: 50px 46px 46px; }
@@ -101,7 +109,6 @@
 
 @layer responsive {
   @media (max-width: 1050px) {
-    .study-layout { grid-template-columns: 250px minmax(0, 1fr); }
     .study-canvas { padding-inline: 28px; }
   }
 

@@ -1,4 +1,3 @@
-"""Local material extraction. Uploaded bytes are processed in-memory and never persisted."""
 from __future__ import annotations
 
 from io import BytesIO
@@ -18,23 +17,19 @@ MAX_EXTRACTED_CHARACTERS = 120_000
 MAX_PDF_PAGES = 40
 ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
-
 class MaterialExtractionError(ValueError):
     pass
-
 
 def _clean_text(value: str) -> str:
     return "\n".join(line.rstrip() for line in value.replace("\x00", "").splitlines()).strip()
 
-
 def _ocr_image(image: Image.Image) -> str:
     return _clean_text(pytesseract.image_to_string(image.convert("RGB"), lang="eng"))
-
 
 def _extract_pdf(data: bytes, name: str, warnings: list[str]) -> str:
     try:
         reader = PdfReader(BytesIO(data))
-    except Exception as exc:  # pypdf raises several parser-specific exceptions
+    except Exception as exc:
         raise MaterialExtractionError(f"INVALID PDF: {name}") from exc
 
     texts: list[str] = []
@@ -59,7 +54,6 @@ def _extract_pdf(data: bytes, name: str, warnings: list[str]) -> str:
 
     return "\n\n".join(texts)
 
-
 def _extract_one(name: str, data: bytes, warnings: list[str]) -> str:
     extension = Path(name).suffix.lower()
     if extension in {".txt", ".md"}:
@@ -75,7 +69,6 @@ def _extract_one(name: str, data: bytes, warnings: list[str]) -> str:
             return _ocr_image(image)
     except (UnidentifiedImageError, OSError) as exc:
         raise MaterialExtractionError(f"INVALID IMAGE: {name}") from exc
-
 
 def extract_materials(files: list[tuple[str, str, bytes]]) -> MaterialExtractionResponse:
     if not files:

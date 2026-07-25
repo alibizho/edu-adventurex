@@ -1,12 +1,3 @@
-"""Direct DbStore round-trip against a live Postgres — exercises every Store method and the
-JSONB (de)serialization boundary. Not hermetic: needs a reachable Postgres at $DATABASE_URL with
-STORE_BACKEND=db. Designed to run INSIDE the backend container (which is on the compose network):
-
-    docker compose exec -T backend python - < backend/tests/test_db_roundtrip.py
-
-It creates a throwaway session, verifies durability + upsert semantics for all tables, then
-deletes the session (FK CASCADE cleans up children) so the DB is left as it was found.
-"""
 import asyncio
 import os
 import sys
@@ -30,12 +21,10 @@ from app.schemas import (
 )
 from app.store.db import DbStore
 
-
 def check(cond: bool, msg: str) -> None:
     print(f"  {'PASS' if cond else 'FAIL'}  {msg}")
     if not cond:
         raise AssertionError(msg)
-
 
 async def main() -> None:
     url = os.environ.get("DATABASE_URL")
@@ -47,22 +36,18 @@ async def main() -> None:
     st = DbStore(url)
     sid = f"dbtest-{uuid.uuid4().hex[:8]}"
     try:
-        # -- init(): CREATE TABLE on a fresh schema is idempotent (already exists in a live stack) --
         await st.init()
         check(True, "init() created/verified tables")
 
-        # -- session topic (also lazily creates the sessions row) --
         await st.set_topic(sid, "Photosynthesis")
         check(await st.get_topic(sid) == "Photosynthesis", "topic set/get")
 
-        # -- transcript --
         await st.append_segment(sid, Segment(id=0, idx=0, text="Plants use light.", t_start=0.0, t_end=1.2))
         await st.append_segment(sid, Segment(id=1, idx=1, text="They make sugar."))
         tx = await st.get_transcript(sid)
         check([s.id for s in tx] == [0, 1], "transcript append/get ordered by seg_id")
         check(tx[0].t_start == 0.0 and tx[1].t_start is None, "nullable float columns round-trip")
 
-        # -- analyses: append is an upsert on (session_id, chunk_id); JSONB nested fields --
         await st.append_analysis(sid, ChunkAnalysis(
             chunk_id=0, text="Plants use light.", confidence=0.9,
             anomalies=[Anomaly(type="hedging", source="mock", score=0.1, evidence="um")],
@@ -80,15 +65,12 @@ async def main() -> None:
             curriculum_update=CurriculumUpdate(
                 added_concepts=["Calvin cycle"]
             ),
-            # Set by fusion.fuse_prosody. These had no columns and were silently dropped, so the
-            # GPU-vs-browser comparison gpu_confidence exists for was impossible against Postgres.
             prosody=SpeechProsody(
                 speech_ms=4200, total_ms=6000, pause_count=3,
                 longest_pause_ms=900, mean_level=0.031, peak_level=0.184,
             ),
             gpu_confidence=0.72,
         ))
-        # re-analyze chunk 0 -> should UPDATE in place, not duplicate
         await st.append_analysis(sid, ChunkAnalysis(chunk_id=0, text="Plants use light.", confidence=0.55))
         an = await st.get_analyses(sid)
         check(len(an) == 2, "append_analysis upserts (no duplicate for re-analyzed chunk 0)")
@@ -112,7 +94,6 @@ async def main() -> None:
             "browser prosody JSONB round-trip",
         )
         check(an[1].gpu_confidence == 0.72, "pre-fusion gpu_confidence round-trip")
-        # The upsert must carry them too, or a re-analyzed chunk keeps stale prosody.
         await st.append_analysis(sid, ChunkAnalysis(
             chunk_id=1, text="They make sugar.", confidence=0.4,
             prosody=SpeechProsody(speech_ms=1000, total_ms=1200, pause_count=0,
@@ -126,12 +107,10 @@ async def main() -> None:
             "re-analyzed chunk updates prosody + gpu_confidence in place",
         )
 
-        # set_analyses replaces the whole set
         await st.set_analyses(sid, [ChunkAnalysis(chunk_id=5, text="replaced", confidence=0.7)])
         an = await st.get_analyses(sid)
         check([a.chunk_id for a in an] == [5], "set_analyses replaces all analyses")
 
-        # -- measurement run + scores (JSONB lists of pydantic models) --
         run = RunResult(
             session_id=sid, delta_overall=0.42, survival_rate=0.75,
             per_question=[QuestionDelta(question_id=0, taught_mean=0.8, cold_mean=0.4, delta=0.4)],
@@ -144,12 +123,10 @@ async def main() -> None:
         check(got.per_question[0].delta == 0.4 and got.calibration_rho == 0.61, "run JSONB nested fields")
         gs = await st.get_scores(sid)
         check(len(gs) == 1 and gs[0].cited_segment_ids == [0, 1], "scores JSONB round-trip")
-        # re-run upserts on the session PK
         run.delta_overall = 0.99
         await st.set_run(sid, run, [])
         check((await st.get_run(sid)).delta_overall == 0.99, "set_run upserts on session_id")
 
-        # -- targeted-question ledger --
         check(await st.next_question_id(sid) == 0, "next_question_id starts at 0")
         await st.record_questions(sid, [
             TargetedQuestion(id=0, chunk_id=5, text="Why sugar?", anomaly_type="hedging", rationale="low conf"),
@@ -169,7 +146,6 @@ async def main() -> None:
         check(answered[1].answered_at is not None, "answered_at timestamp set")
         check(await st.covered_chunk_ids(sid) == {5}, "answered chunk now counts as covered")
 
-        # -- verifier-gated conversation: answer_key + parent_id survive, and the thread is walked --
         await st.record_questions(sid, [
             TargetedQuestion(id=2, chunk_id=6, text="What does a routing table hold?",
                              answer_key="Destination prefixes mapped to a next hop."),
@@ -189,7 +165,6 @@ async def main() -> None:
         await st.record_answer(sid, 3, "the longest prefix match")
         check(await st.thread_turns(sid, 2) == 2, "thread_turns counts the whole chain either way")
 
-        # -- path memory: the struggle ledger rides inside the PathMemory JSONB blob --
         pid = f"path-{sid}"
         fresh = await st.get_memory(pid)
         check(fresh.path_id == pid and fresh.class_progress == {}, "get_memory defaults for a new path")
@@ -209,12 +184,10 @@ async def main() -> None:
 
         print("\nALL DB ROUND-TRIP CHECKS PASSED")
     finally:
-        # cleanup: delete the session; FK ondelete=CASCADE removes segments/analyses/runs/qa_entries
         async with st._engine.begin() as conn:
             await conn.execute(text("DELETE FROM sessions WHERE session_id = :s"), {"s": sid})
         await st.dispose()
         print(f"cleaned up session {sid}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

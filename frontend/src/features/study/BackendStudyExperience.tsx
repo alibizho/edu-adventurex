@@ -13,18 +13,18 @@ import {
   type GrowthPath,
   type TargetedQuestion,
 } from "../learning-data/backend.types";
+import { useClassroomCast } from "./classroom.cast";
 import { SEATS, seatName, type SeatId } from "./classroom.seats";
 import { BackendTeachingWorkspace } from "./components/BackendTeachingWorkspace";
 import { Classroom } from "./components/Classroom";
 import { MarkdownNotes } from "./components/MarkdownNotes";
 import { ModuleBanner } from "./components/ModuleBanner";
 import { SessionExitScene } from "./components/SessionExitScene";
-import { StudentSidebar } from "./components/StudentSidebar";
-import { useContinuousRecorder, type SpeechProsody } from "./useContinuousRecorder";
-import type { StudyModule, StudyToolId } from "./study.types";
+import { usePressToTalkRecorder, type SpeechProsody } from "./usePressToTalkRecorder";
+import type { StudyModule } from "./study.types";
 
 const TOOLS = [
-  { id: "progress", label: "Progress" },
+  { id: "map", label: "Map" },
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ] as const;
@@ -73,38 +73,34 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const [hands, setHands] = useState<RaisedHand[]>([]);
   const [transcript, setTranscript] = useState<string[]>([]);
   const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
   const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [turnCount, setTurnCount] = useState(0);
-  // Readiness is NOT computed here any more. It is the share of class objectives the backend
-  // judged as actually explained; a local turn-count estimate would just disagree with it.
   const readiness = progress?.readiness ?? 0;
   const [queueDepth, setQueueDepth] = useState(0);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
   const sessionId = classSessionId(pathId, classId);
+  const cast = useClassroomCast(sessionId);
 
-  // Recording and analysis run at different speeds: a chunk takes seconds to come back and the
-  // teacher keeps talking through it. Chunks queue here and drain one at a time — the GPU
-  // serializes anyway, so parallel uploads would only queue further downstream.
   const queueRef = useRef<{ audio: Blob; prosody: SpeechProsody }[]>([]);
   const drainingRef = useRef(false);
   const chunkIdRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   transcriptRef.current = transcript;
 
+  const generationRef = useRef(0);
+
   useEffect(() => {
     let active = true;
     setIsLoading(true);
     setError(null);
-    // The GPU probe crosses a tunnel to a rented box and can take the better part of a minute when
-    // that box is cold. It rides on its own promise rather than inside the Promise.all below so the
-    // material still renders promptly; voice simply switches on when the answer lands.
     backendLearningDataSource
       .confusionHealth()
       .then((confusion) => { if (active) setVoiceAvailable(Boolean(confusion.reachable)); })
@@ -139,33 +135,24 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       const memory = await backendLearningDataSource.getMemory(pathId);
       setProgress(memory.class_progress[classId] ?? null);
     } catch {
-      // A missed poll just means the checklist updates on the next one.
     }
   }, [classId, pathId]);
 
-  // Objective coverage is judged in a background task, so it can't ride back on the teaching
-  // response. Poll for it whenever the class is live — a cheap DB read, no LLM.
-  //
-  // Keeps running through a one-to-one: answering a student's question is teaching too, and the
-  // backend credits objectives from it, so freezing the checklist while zoomed in was half the
-  // reported lag. The other half was the interval — the backend now judges after every chunk, and
-  // a 5s poll on top of that put a checkmark up to five seconds behind a verdict already sitting
-  // in the database.
   useEffect(() => {
     if (phase === "reading") return;
     const timer = window.setInterval(() => void refreshProgress(), 2_000);
     return () => window.clearInterval(timer);
   }, [phase, refreshProgress]);
 
-  /** Give a new question to whichever student isn't already holding one. */
   const raiseHand = useCallback((question: TargetedQuestion) => {
+    const roll = Math.random();
     setHands((current) => {
       const taken = new Set(current.map((hand) => hand.seatId));
-      const free = SEATS.find((seat) => !taken.has(seat.id));
+      const free = SEATS.filter((seat) => !taken.has(seat.id));
       const entry = { question, askedAt: Date.now() };
-      if (free) return [...current, { seatId: free.id, ...entry }];
-      // Every seat is occupied: the teacher is talking past six unanswered questions. Retire the
-      // oldest — a stale probe about something said minutes ago is worth less than this one.
+      if (free.length > 0) {
+        return [...current, { seatId: free[Math.floor(roll * free.length)].id, ...entry }];
+      }
       const oldest = current.reduce((a, b) => (a.askedAt <= b.askedAt ? a : b));
       return [...current.filter((hand) => hand !== oldest), { seatId: oldest.seatId, ...entry }];
     });
@@ -179,10 +166,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       while (queueRef.current.length > 0) {
         const { audio, prosody } = queueRef.current.shift()!;
         setQueueDepth(queueRef.current.length);
+        const generation = generationRef.current;
         try {
           const response = await backendLearningDataSource.teachAudio(
             pathId, classId, audio, chunkIdRef.current, transcriptRef.current.slice(-6), true, prosody,
           );
+          if (generationRef.current !== generation) continue;
           chunkIdRef.current += 1;
           if (response.degraded || !response.analysis.text.trim()) {
             setVoiceAvailable(false);
@@ -194,19 +183,13 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
           setLastConfidence(response.analysis.confidence);
           setTranscript((current) => [...current, heard]);
           setTurnCount((current) => current + 1);
-          const expanded = response.analysis.curriculum_update?.added_concepts ?? [];
-          if (expanded.length > 0) setToolMessage(`CURRICULUM EXPANDED: ${expanded.join(", ").toUpperCase()}`);
-          else if (response.analysis.anomalies.length > 0) {
-            setToolMessage(`LIVE ANALYSIS: ${response.analysis.anomalies.map(({ type }) => type.replaceAll("_", " ")).join(" / ").toUpperCase()}`);
-          } else setToolMessage("LIVE ANALYSIS: EXPLANATION CLEAR.");
-
           if (response.asked && response.question) raiseHand(response.question);
-          // Every chunk now triggers a coverage check on the backend. Refresh per chunk rather
-          // than once the whole queue empties: while the teacher keeps talking the queue may not
-          // empty for a minute, and the checklist would sit still through all of it.
+          if (response.explained && response.student_reply.trim()) {
+            setExplanation(response.student_reply.trim());
+          }
           void refreshProgress();
         } catch (caught) {
-          setError(apiMessage(caught));
+          if (generationRef.current === generation) setError(apiMessage(caught));
         }
       }
     } finally {
@@ -217,7 +200,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     }
   }, [classId, pathId, raiseHand, refreshProgress]);
 
-  /** Typed fallback when the GPU is down. Same shape as a spoken chunk, minus the audio analysis. */
   const teachText = useCallback(async (text: string) => {
     setIsBusy(true);
     setError(null);
@@ -227,6 +209,9 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       setTranscript((current) => [...current, text]);
       setTurnCount((current) => current + 1);
       if (response.asked && response.question) raiseHand(response.question);
+      if (response.explained && response.student_reply.trim()) {
+        setExplanation(response.student_reply.trim());
+      }
     } catch (caught) {
       setError(apiMessage(caught));
     } finally {
@@ -240,14 +225,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     void drain();
   }, [drain]);
 
-  const recorder = useContinuousRecorder({ onUtterance: handleUtterance });
-  const { disarm } = recorder;
+  const recorder = usePressToTalkRecorder({ onUtterance: handleUtterance });
+  const { cancel: cancelRecording } = recorder;
 
-  // The mic belongs to the room. Entering a one-to-one conversation hands it to that view, and
-  // leaving the class entirely must not leave the browser recording indicator on.
   useEffect(() => {
-    if (phase !== "classroom") disarm();
-  }, [phase, disarm]);
+    if (phase !== "classroom") cancelRecording();
+  }, [phase, cancelRecording]);
 
   const zoomHand = hands.find((hand) => hand.seatId === zoomSeat) ?? null;
 
@@ -255,18 +238,11 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     setHands((current) => current.filter((hand) => hand.seatId !== seatId));
   }, []);
 
-  // Stable identity: Classroom starts a 520 ms transition timer when a seat is clicked, and an
-  // inline arrow here re-created that timer on every re-render of this component.
   const handleEnterZoom = useCallback((seatId: SeatId) => {
     setZoomSeat(seatId);
     setPhase("zoom");
   }, []);
 
-  /**
-   * Shared tail of both answer paths. The hand is NOT retired here: the student may still be
-   * unconvinced and ask a follow-up, and clearing it mid-answer used to unmount the conversation
-   * before the reply could even be shown. Leaving the zoom is what ends the exchange.
-   */
   const settleTurn = useCallback(async (
     hand: RaisedHand,
     answer: string,
@@ -276,12 +252,9 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   ) => {
     setTranscript((current) => [...current, answer]);
     if (followUp) {
-      // Same seat, new question: the student stays put and presses on the same concept.
       setHands((current) => current.map((item) => (
         item.seatId === hand.seatId ? { ...item, question: followUp, askedAt: Date.now() } : item
       )));
-    } else if (conversationOver) {
-      resolveHand(hand.seatId);
     }
     return {
       teacherText: answer,
@@ -295,7 +268,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     setIsBusy(true);
     setError(null);
     try {
-      // Not silent: this student asked you something directly and should answer back.
       const response = await backendLearningDataSource.teachAudio(
         pathId, classId, audio, chunkIdRef.current, transcriptRef.current.slice(-6), false, prosody,
         zoomHand.question.id,
@@ -307,7 +279,8 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       }
       return await settleTurn(
         zoomHand, response.analysis.text.trim(), response.student_reply,
-        response.question, response.conversation_over ?? true,
+        response.question,
+        response.question ? false : response.conversation_over ?? true,
       );
     } catch (caught) {
       setError(apiMessage(caught));
@@ -322,7 +295,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     setIsBusy(true);
     setError(null);
     try {
-      // The text route has no grading path on the backend, so one answer settles it.
       const response = await backendLearningDataSource.teachText(pathId, classId, text);
       await backendLearningDataSource
         .answerQuestion(sessionId, zoomHand.question.id, text)
@@ -336,14 +308,39 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     }
   }
 
+  async function resetClass() {
+    if (isResetting) return;
+    setIsResetting(true);
+    generationRef.current += 1;
+    queueRef.current = [];
+    cancelRecording();
+    try {
+      const memory = await backendLearningDataSource.resetClass(pathId, classId);
+      setProgress(memory.class_progress[classId] ?? null);
+      setTranscript([]);
+      setHands([]);
+      setZoomSeat(null);
+      setLastHeard(null);
+      setExplanation(null);
+      setLastConfidence(null);
+      setTurnCount(0);
+      setQueueDepth(0);
+      chunkIdRef.current = 0;
+      setError(null);
+    } catch (caught) {
+      setError(apiMessage(caught));
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
   async function finish(completionMode: SessionCompletionMode) {
     if (isBusy) return false;
-    disarm();
+    cancelRecording();
     setIsBusy(true);
     setError(null);
     try {
       const updatedMemory = await backendLearningDataSource.endClass(pathId, classId, completionMode);
-      // Keep the readiness the learner earned — the backend no longer stamps 100 on every class.
       setProgress(updatedMemory.class_progress[classId] ?? null);
       backendLearningDataSource.startAnalysis(sessionId).catch(() => undefined);
       setIsClosing(true);
@@ -360,27 +357,10 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     navigate(`${ROUTES.summary}?path=${encodeURIComponent(pathId)}&class=${encodeURIComponent(classId)}`, { replace: true });
   }, [classId, navigate, pathId]);
 
-  function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "progress") {
-      navigate(`${ROUTES.progress}?path=${encodeURIComponent(pathId)}`);
-      return;
-    }
-    if (toolId === "tutorial") {
-      setToolMessage("TIP: EXPLAIN THE IDEA IN YOUR OWN WORDS, THEN PAUSE.");
-      return;
-    }
-    setPhase("reading");
-    setToolMessage("LOCAL VIEW RESET. BACKEND HISTORY IS RETAINED.");
-  }
-
-  function toggleMic() {
-    if (recorder.isArmed) recorder.disarm();
-    else void recorder.arm();
-  }
-
   if (isLoading) return <div className="screen study-screen"><AppHeader /><div className="backend-page-state retro-panel">GENERATING LEARNING MATERIAL...</div></div>;
   if (!path || !unit || !visualModule) return (
     <div className="screen study-screen"><AppHeader /><div className="backend-page-state retro-panel" role="alert"><strong>LEARNING MATERIAL UNAVAILABLE</strong><p>{error}</p><button className="solid-action" onClick={() => navigate(ROUTES.material)}>BACK HOME</button></div></div>
+
   );
 
   const isZoom = phase === "zoom";
@@ -389,10 +369,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       <AppHeader />
       {isClosing ? (
         <SessionExitScene studyModule={visualModule} onComplete={handleExitComplete} />
+
       ) : phase === "classroom" ? (
         <Classroom
           studyModule={visualModule}
           readiness={readiness}
+          cast={cast}
           objectives={classChecklist(unit)}
           coveredObjectives={progress?.covered_objectives ?? []}
           objectiveEvidence={progress?.objective_evidence ?? {}}
@@ -402,32 +384,34 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
             raisedHands: hands.map((hand) => hand.seatId),
             recorderState: recorder.state,
             meterRef: recorder.meterRef,
+            elapsedSeconds: recorder.elapsedSeconds,
             queueDepth,
             isBusy,
+            isResetting,
             lastHeard,
+            explanation,
             turnCount,
             error: error ?? recorder.error,
             voiceAvailable,
             lastConfidence,
-            onToggleMic: toggleMic,
+            onToggleMic: recorder.toggle,
+            onDiscardRecording: cancelRecording,
+            onDismissExplanation: () => setExplanation(null),
             onTextAnswer: (text) => void teachText(text),
+            onReset: () => void resetClass(),
             onFinish: () => void finish("self-teaching"),
           }}
         />
+
       ) : (
         <>
+          {}
           <main className="study-layout">
-            <StudentSidebar
-              student={{ name: isZoom && zoomSeat ? seatName(zoomSeat) : "AI STUDENT", readiness }}
-              tools={TOOLS}
-              message={toolMessage}
-              onToolAction={handleToolAction}
-              avatarVariant={isZoom ? "student" : "robot"}
-            />
             <section className={isZoom ? "conversation-canvas" : "study-canvas halftone-screen"}>
               {isZoom && zoomHand ? (
                 <BackendTeachingWorkspace
                   seatName={seatName(zoomHand.seatId)}
+                  sprite={cast[zoomHand.seatId].sprite}
                   question={zoomHand.question}
                   isBusy={isBusy}
                   error={error}
@@ -435,34 +419,48 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
                   onAudioAnswer={answerZoomed}
                   onTextAnswer={answerZoomedText}
                   onBackToClass={() => {
-                    // Walking away is what retires the hand — the student keeps it while there is
-                    // still a follow-up outstanding.
                     resolveHand(zoomHand.seatId);
                     setZoomSeat(null);
                     setPhase("classroom");
                   }}
                 />
+
               ) : isZoom ? (
                 <div className="backend-page-state retro-panel">
                   <strong>THAT QUESTION IS RESOLVED</strong>
+
                   <button className="solid-action" onClick={() => { setZoomSeat(null); setPhase("classroom"); }}>BACK TO CLASS</button>
+
                 </div>
+
               ) : (
                 <>
                   <ModuleBanner label="CURRENT MODULE" title={path.confirmed_topic.toUpperCase()} />
+
                   <article className="document-panel retro-panel backend-document-panel">
                     <header className="document-meta"><span>DOC_ID: {visualModule.document.id}</span><span>LIVE BACKEND</span></header>
+
                     <h2>{unit.title.toUpperCase()}</h2>
+
                     <p>{unit.objective}</p>
+
                     <MarkdownNotes source={unit.teacher_notes} />
+
                     <button type="button" className="solid-action ready-action" onClick={() => setPhase("classroom")}>READY TO TEACH</button>
+
                   </article>
+
                 </>
+
               )}
             </section>
+
           </main>
+
         </>
+
       )}
     </div>
+
   );
 }

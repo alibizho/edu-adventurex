@@ -1,27 +1,9 @@
-"""Fusion of the two instruments — the best-of-both-worlds layer.
-
-Cross each segment's DISTURBANCE (1 - confidence, from the ml confusion engine: how unsure the
-kid *sounded* + what was factually wrong) with its TRANSFER DELTA (from the ensemble measurement:
-did a naive listener actually learn it). The two are independent — one hears the audio, the other
-sees only what transmitted — so their agreement is trustworthy and their disagreement is the
-diagnostic:
-
-    high disturbance + failed transfer -> aware_gap          (felt it, couldn't teach it)
-    high disturbance + passed transfer -> productive_struggle (unsure, but it landed)
-    low  disturbance + failed transfer -> BLIND_SPOT          (confident and wrong — the money case)
-    low  disturbance + passed transfer -> mastery
-
-Plus a calibration score: does the kid sound unsure exactly where teaching failed?
-"""
 from .schemas import (Arm, ChunkAnalysis, FusionResult, QuestionDelta, Score,
                       SegmentFusion)
 
-DISTURBANCE_HIGH = 0.5     # 1 - confidence above this == "sounded unsure"
-
+DISTURBANCE_HIGH = 0.5
 
 def _segment_deltas(scores: list[Score], per_question: list[QuestionDelta]) -> dict[int, float]:
-    """Mean transfer delta per segment: average the delta of every question whose TAUGHT answers
-    cited that segment (attribution, report §4.6)."""
     qdelta = {d.question_id: d.delta for d in per_question}
     seg_qs: dict[int, set[int]] = {}
     for s in scores:
@@ -34,7 +16,6 @@ def _segment_deltas(scores: list[Score], per_question: list[QuestionDelta]) -> d
         if ds:
             out[seg] = sum(ds) / len(ds)
     return out
-
 
 def _quadrant(disturbance: float, delta: float | None) -> str:
     if delta is None:
@@ -49,7 +30,6 @@ def _quadrant(disturbance: float, delta: float | None) -> str:
         return "blind_spot"
     return "mastery"
 
-
 def _pearson(xs: list[float], ys: list[float]) -> float | None:
     n = len(xs)
     if n < 2:
@@ -61,7 +41,6 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
     if dx == 0 or dy == 0:
         return None
     return round(num / (dx * dy), 3)
-
 
 def fuse(
     session_id: str,
@@ -89,7 +68,7 @@ def fuse(
         ))
         if a is not None and delta is not None:
             xs.append(disturbance)
-            ys.append(-delta)          # higher == more failed transfer
+            ys.append(-delta)
 
     counts: dict[str, int] = {}
     for s in per_segment:

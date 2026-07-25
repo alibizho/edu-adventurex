@@ -13,7 +13,7 @@ import type { StudyToolConfig, StudyToolId } from "../study/study.types";
 import { BackendSummaryPage } from "./BackendSummaryPage";
 
 const SUMMARY_TOOLS: readonly StudyToolConfig[] = [
-  { id: "progress", label: "Progress" },
+  { id: "map", label: "Map" },
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ];
@@ -27,6 +27,7 @@ function formatDuration(seconds: number) {
 
 function MasteryIcon({ icon }: { icon: ConceptMasteryIcon }) {
   return <span className={`mastery-icon mastery-icon--${icon}`} aria-hidden="true"><i /></span>;
+
 }
 
 function LegacySummaryPage() {
@@ -66,8 +67,8 @@ function LegacySummaryPage() {
   }, [conceptId, getSessionSummary]);
 
   function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "progress") {
-      navigate(conceptId ? `${ROUTES.progress}?concept=${conceptId}` : ROUTES.progress);
+    if (toolId === "map") {
+      navigate(ROUTES.map);
       return;
     }
     if (toolId === "tutorial") {
@@ -99,12 +100,17 @@ function LegacySummaryPage() {
         <section className="summary-canvas">
           {isLoading ? (
             <div className="summary-empty retro-panel" role="status">LOADING SESSION SUMMARY...</div>
+
           ) : !summary || loadError ? (
             <div className="summary-empty retro-panel">
               <h1>NO COMPLETED SESSION</h1>
+
               <p>{loadError ?? "FINISH A TEACHING CONVERSATION TO CREATE YOUR FIRST SUMMARY."}</p>
+
               <button type="button" className="solid-action" onClick={() => navigate(ROUTES.concepts)}>START LEARNING</button>
+
             </div>
+
           ) : (
             <div className="summary-dashboard">
               <h1>{summary.moduleTitle}</h1>
@@ -112,57 +118,87 @@ function LegacySummaryPage() {
               <div className="summary-top-grid">
                 <section className="summary-panel growth-panel" aria-labelledby="growth-title">
                   <h2 id="growth-title"><i />GROWTH TIMELINE</h2>
+
                   <div className="growth-track">
                     {summary.milestones.map((milestone) => (
                       <div key={milestone.id} className={`growth-stop growth-stop--${milestone.status}`}>
                         {milestone.status === "completed" && <span>COMPLETED</span>}
+
                         <b aria-hidden="true">{milestone.status === "completed" ? "✓" : milestone.status === "next" ? "■" : "○"}</b>
+
                         <strong>{milestone.label}</strong>
+
                       </div>
+
                     ))}
                   </div>
+
                 </section>
 
                 <section className="master-panel" aria-labelledby="master-title">
                   <h2 id="master-title">★ MASTER STATUS</h2>
+
                   <p>“{summary.masterTitle}: {summary.masterQuote}”</p>
+
                   <strong>RANK: {summary.rank}</strong>
+
                 </section>
+
               </div>
 
               <div className="summary-bottom-grid">
                 <section className="summary-panel mastery-panel" aria-labelledby="mastery-title">
                   <h2 id="mastery-title">CONCEPTS MASTERED</h2>
+
                   <div className="mastery-grid">
                     {summary.mastery.map((metric) => (
                       <div className="mastery-item" key={metric.id}>
                         <MasteryIcon icon={metric.icon} />
+
                         <div>
                           <strong>{metric.label}</strong>
+
                           <span role="progressbar" aria-label={`${metric.label} mastery`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={metric.score}>
                             <i style={{ width: `${metric.score}%` }} />
+
                           </span>
+
                         </div>
+
                       </div>
+
                     ))}
                   </div>
+
                 </section>
 
                 <section className="summary-panel statistics-panel" aria-labelledby="statistics-title">
                   <h2 id="statistics-title">TEACHING STATISTICS</h2>
+
                   <dl>
                     <div><dt>STUDENTS TAUGHT</dt><dd>{summary.studentsTaught}</dd></div>
+
                     <div><dt>QUESTIONS ANSWERED</dt><dd>{summary.questionsAnswered}</dd></div>
+
                     <div><dt>GAPS DISCOVERED</dt><dd>{summary.gapsDiscovered}</dd></div>
+
                   </dl>
+
                 </section>
+
               </div>
+
             </div>
+
           )}
         </section>
+
       </main>
+
       <StatusBar label={statusLabel} full meta={summary ? `${formatDuration(summary.durationSeconds)} SESSION TIME` : ""} />
+
     </div>
+
   );
 }
 
@@ -171,5 +207,6 @@ export function SummaryPage() {
   const pathId = searchParams.get("path");
   const classId = searchParams.get("class");
   if (pathId && classId) return <BackendSummaryPage pathId={pathId} classId={classId} />;
+
   return <LegacySummaryPage />;
 }

@@ -16,9 +16,9 @@ const DYNAMIC_NODE_LAYOUT: ReadonlyArray<Pick<ConceptNodeConfig, "shape" | "x" |
   { shape: "wide", x: 72, y: 29, icon: "outline" },
   { shape: "circle hero", x: 47, y: 57 },
   { shape: "wide", x: 76, y: 63 },
-  { shape: "square", x: 24, y: 76, icon: "grid" },
-  { shape: "circle small-circle", x: 40, y: 70 },
-  { shape: "circle medium-circle", x: 65, y: 81 },
+  { shape: "square", x: 20, y: 78, icon: "grid" },
+  { shape: "circle small-circle", x: 38, y: 80 },
+  { shape: "circle medium-circle", x: 66, y: 82 },
 ];
 
 export function ConceptPage() {
@@ -76,25 +76,35 @@ export function ConceptPage() {
       <AppHeader />
       <main className="concept-main halftone-screen">
         <h1 className="boxed-title concept-title">SELECT A CONCEPT TO START TEACHING</h1>
+
         {isLoading ? (
           <div className="concept-api-state retro-panel" role="status">BUILDING YOUR LEARNING PATH...</div>
+
         ) : loadError ? (
           <div className="concept-api-state retro-panel" role="alert">
             <strong>LEARNING PATH UNAVAILABLE</strong>
+
             <p>{loadError}</p>
+
             <button type="button" className="solid-action" onClick={() => navigate(ROUTES.material)}>BACK HOME</button>
+
           </div>
+
         ) : (
           <ConceptMap
             concepts={concepts}
             selectedConceptId={selectedConceptId}
             onSelect={handleSelect}
           />
+
         )}
       </main>
+
       <div className="concept-footer">
         <StatusBar label={loadError ? "BACKEND_ERROR" : selectedConcept ? "SELECTION READY" : "WAITING FOR INPUT"} />
+
         <div className="concept-build">OCEAN SIMULATION: V1.0.4&nbsp; | &nbsp;DITHERING MODE: ACTIVE</div>
+
         <button
           type="button"
           className="solid-action confirm-action"
@@ -103,7 +113,10 @@ export function ConceptPage() {
         >
           CONFIRM SELECTION
         </button>
+
       </div>
+
     </div>
+
   );
 }

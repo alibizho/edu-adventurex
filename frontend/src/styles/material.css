@@ -125,7 +125,6 @@
     outline: 3px solid var(--ink);
     outline-offset: 4px;
   }
-  .material-hint { margin: 45px auto 0; text-align: center; font-size: 13px; color: #565656; }
   .material-shortcuts {
     display: flex;
     justify-content: center;
@@ -157,7 +156,6 @@
     .entry-textarea { min-height: 190px; flex-basis: 190px; font-size: 17px; }
     .entry-actions, .entry-secondary-actions { align-items: stretch; flex-direction: column; }
     .selected-material { gap: 8px; }
-    .material-hint { line-height: 1.6; }
     .material-shortcuts { gap: 12px; margin-top: 28px; }
     .material-shortcuts .retro-tab,
     .material-shortcuts .retro-tab:first-child { min-width: 0; flex: 1 1 135px; }

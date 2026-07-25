@@ -5,5 +5,6 @@ export function PixelRobot() {
       <path d="M22 27h7v8h-7zm14 0h7v8h-7z" fill="currentColor" />
       <path d="M23 42h18v4H23zM7 28h5v15H7zm45 0h5v15h-5z" fill="currentColor" />
     </svg>
+
   );
 }

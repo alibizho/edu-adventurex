@@ -10,6 +10,7 @@ import { StudentSidebar } from "./components/StudentSidebar";
 import { SessionExitScene } from "./components/SessionExitScene";
 import { Classroom } from "./components/Classroom";
 import { TeachingWorkspace } from "./components/TeachingWorkspace";
+import { useClassroomCast } from "./classroom.cast";
 import { getStudyModule, resolveStudyConceptId } from "./study.data";
 import type { StudyModule } from "./study.types";
 import { useStudySession } from "./useStudySession";
@@ -22,6 +23,7 @@ type StudyExperienceProps = {
 function StudyExperience({ studyModule }: StudyExperienceProps) {
   const navigate = useNavigate();
   const session = useStudySession(studyModule);
+  const cast = useClassroomCast(studyModule.conceptId);
   const [isClosing, setIsClosing] = useState(false);
 
   useEffect(() => {
@@ -53,13 +55,16 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
       <AppHeader />
       {isClosing ? (
         <SessionExitScene studyModule={studyModule} onComplete={handleExitComplete} />
+
       ) : isLobby ? (
         <Classroom
           studyModule={studyModule}
           readiness={session.student.readiness}
+          cast={cast}
           onReturnToReading={session.returnToReading}
           onEnterZoom={session.startConversation}
         />
+
       ) : (
         <>
           <main className="study-layout">
@@ -82,24 +87,33 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
                   onFinish={handleGuidedCompletion}
                   onBackToMaterial={session.returnToReading}
                 />
+
               ) : (
                 <>
                   <ModuleBanner label={studyModule.moduleLabel} title={studyModule.title} />
+
                 <LearningDocument
                   document={studyModule.document}
                   isReady={false}
                   onReady={session.markReady}
                 />
+
                 </>
+
               )}
             </section>
+
           </main>
+
           {!isConversation && (
             <StatusBar label={session.statusLabel} full meta={studyModule.status.meta} />
+
           )}
         </>
+
       )}
     </div>
+
   );
 }
 
@@ -111,6 +125,7 @@ export function StudyPage() {
   const classId = searchParams.get("class");
   if (pathId && classId) {
     return <BackendStudyExperience key={`${pathId}:${classId}`} pathId={pathId} classId={classId} />;
+
   }
   const conceptId = resolveStudyConceptId(
     searchParams.get("concept"),
@@ -119,4 +134,5 @@ export function StudyPage() {
   const studyModule = getStudyModule(conceptId);
 
   return <StudyExperience key={studyModule.conceptId} studyModule={studyModule} />;
+
 }

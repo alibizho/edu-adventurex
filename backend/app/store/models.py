@@ -1,29 +1,21 @@
-"""SQLAlchemy ORM models for the session context store. Nested fields (anomalies, detail,
-per_question, scores) are JSONB. The Pydantic models in schemas.py are the serialization boundary —
-rows convert to/from them via .model_dump() / .model_validate() (see store/db.py)."""
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-
 class Base(DeclarativeBase):
     pass
 
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
 
 class SessionRow(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     topic: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
 
 class SegmentRow(Base):
     __tablename__ = "segments"
@@ -31,12 +23,11 @@ class SegmentRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id", ondelete="CASCADE"))
-    seg_id: Mapped[int] = mapped_column(Integer)       # the Segment.id (stable pk within the session)
+    seg_id: Mapped[int] = mapped_column(Integer)
     idx: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     t_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     t_end: Mapped[float | None] = mapped_column(Float, nullable=True)
-
 
 class AnalysisRow(Base):
     __tablename__ = "analyses"
@@ -48,16 +39,12 @@ class AnalysisRow(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     localized_target: Mapped[str | None] = mapped_column(Text, nullable=True)
-    anomalies: Mapped[list] = mapped_column(JSONB, default=list)   # list[Anomaly] as dicts
-    detail: Mapped[list] = mapped_column(JSONB, default=list)      # list[WordScore] as dicts
+    anomalies: Mapped[list] = mapped_column(JSONB, default=list)
+    detail: Mapped[list] = mapped_column(JSONB, default=list)
     student_question: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     curriculum_update: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    # Browser-measured prosody + the ml-service's own confidence from before fusion. Both are set
-    # by fusion.fuse_prosody; without columns for them the durable store silently dropped them and
-    # the GPU-vs-browser comparison gpu_confidence exists for was impossible to make.
     prosody: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     gpu_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-
 
 class RunRow(Base):
     __tablename__ = "runs"
@@ -68,10 +55,9 @@ class RunRow(Base):
     delta_overall: Mapped[float] = mapped_column(Float, default=0.0)
     survival_rate: Mapped[float] = mapped_column(Float, default=0.0)
     calibration_rho: Mapped[float | None] = mapped_column(Float, nullable=True)
-    per_question: Mapped[list] = mapped_column(JSONB, default=list)  # list[QuestionDelta] as dicts
-    scores: Mapped[list] = mapped_column(JSONB, default=list)        # list[Score] as dicts
+    per_question: Mapped[list] = mapped_column(JSONB, default=list)
+    scores: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
 
 class QAEntryRow(Base):
     __tablename__ = "qa_entries"
@@ -86,33 +72,22 @@ class QAEntryRow(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     answered_at: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # Ground truth the verifier grades against, and the question this one follows up on. Unlike
-    # PathMemory (one JSONB blob) the QA ledger is a real table, so these need real columns.
     answer_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-
 class GrowthPathRow(Base):
-    """The whole GrowthPath as a JSONB blob (schemas.GrowthPath is the serialization boundary).
-    Independent of the sessions table; teaching sessions ("<path_id>:<class_id>") create their own
-    sessions rows lazily."""
     __tablename__ = "growth_paths"
 
     path_id: Mapped[str] = mapped_column(String, primary_key=True)
-    payload: Mapped[dict] = mapped_column(JSONB, default=dict)  # GrowthPath.model_dump()
-    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-
 class PathMemoryRow(Base):
-    """Cross-class memory (PathMemory) as a JSONB blob, keyed by path_id."""
     __tablename__ = "path_memory"
 
     path_id: Mapped[str] = mapped_column(String, primary_key=True)
-    payload: Mapped[dict] = mapped_column(JSONB, default=dict)  # PathMemory.model_dump()
-    # _now() is tz-aware (UTC); the column must be TIMESTAMP WITH TIME ZONE or asyncpg rejects it.
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
 
 class AnalysisJobRow(Base):
     __tablename__ = "analysis_jobs"

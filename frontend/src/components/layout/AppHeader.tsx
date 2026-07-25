@@ -7,15 +7,8 @@ import { PixelTeacherAvatar } from "../visuals/PixelTeacherAvatar";
 export function AppHeader() {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const activePath = localStorage.getItem("wut:active-path");
-  const activeClass = localStorage.getItem("wut:active-class");
-  const teachRoute = activePath && activeClass
-    ? `${ROUTES.study}?path=${encodeURIComponent(activePath)}&class=${encodeURIComponent(activeClass)}`
-    : ROUTES.study;
   const navItems = [
     { label: "HOME", to: ROUTES.material, end: true },
-    { label: "TEACH", to: teachRoute, end: false },
-    { label: "PROGRESS", to: ROUTES.progress, end: false },
     { label: "MAP", to: ROUTES.map, end: false },
   ] as const;
 
@@ -32,6 +25,7 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <NavLink className="brand" to={ROUTES.material} aria-label="WUT? home">WUT?</NavLink>
+
       <nav
         id="primary-navigation"
         className={`primary-nav ${isMenuOpen ? "is-open" : ""}`}
@@ -47,8 +41,10 @@ export function AppHeader() {
           >
             {label}
           </NavLink>
+
         ))}
       </nav>
+
       <div className="header-tools">
         <button
           type="button"
@@ -60,8 +56,12 @@ export function AppHeader() {
         >
           {isMenuOpen ? <X size={29} strokeWidth={3} /> : <Menu size={29} strokeWidth={3} />}
         </button>
+
         <div className="teacher-profile"><PixelTeacherAvatar /></div>
+
       </div>
+
     </header>
+
   );
 }

@@ -2,7 +2,6 @@ import { Route, Routes } from "react-router-dom";
 import { ConceptPage } from "../features/concepts/ConceptPage";
 import { MaterialPage } from "../features/material/MaterialPage";
 import { NotFoundPage } from "../features/not-found/NotFoundPage";
-import { ProgressPage } from "../features/progress/ProgressPage";
 import { KnowledgeMapPage } from "../features/knowledge-map/KnowledgeMapPage";
 import { StudyPage } from "../features/study/StudyPage";
 import { SummaryPage } from "../features/summary/SummaryPage";
@@ -15,13 +14,20 @@ export function App() {
       <ScrollToTop />
       <Routes>
         <Route path={ROUTES.material} element={<MaterialPage />} />
+
         <Route path={ROUTES.concepts} element={<ConceptPage />} />
+
         <Route path={ROUTES.study} element={<StudyPage />} />
-        <Route path={ROUTES.progress} element={<ProgressPage />} />
+
         <Route path={ROUTES.summary} element={<SummaryPage />} />
+
         <Route path={ROUTES.map} element={<KnowledgeMapPage />} />
+
         <Route path="*" element={<NotFoundPage />} />
+
       </Routes>
+
     </>
+
   );
 }

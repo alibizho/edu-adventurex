@@ -1,4 +1,3 @@
-"""Transfer-question generation from a transcript (report §4.2), each with a ground-truth key."""
 import re
 
 from ..config import settings
@@ -6,7 +5,6 @@ from ..llm import generator_chat
 from ..schemas import Question, QuestionKind, Segment
 from .parsing import extract_json_array
 from .prompts import GENERATOR_SYSTEM
-
 
 def _parse_numbered_list(text: str) -> list[str]:
     items = []
@@ -16,10 +14,7 @@ def _parse_numbered_list(text: str) -> list[str]:
             items.append(m.group(1).strip())
     return items
 
-
 async def generate_questions(transcript: list[Segment], source: str = "") -> list[Question]:
-    """Return candidate transfer questions (settings.n_candidate_questions of them), each with an
-    answer key grounded in `source` (ground truth). Filtering happens in pipeline/filter.py."""
     lesson = "\n".join(f"[{s.id}] {s.text}" for s in transcript)
     user = f"LESSON:\n{lesson}"
     if source.strip():
@@ -38,7 +33,6 @@ async def generate_questions(transcript: list[Segment], source: str = "") -> lis
     if questions:
         return questions
 
-    # Fallback: numbered list without keys (verifier will mark these incorrect — visible downstream).
     return [
         Question(id=i, text=t, kind=QuestionKind.transfer)
         for i, t in enumerate(_parse_numbered_list(raw))

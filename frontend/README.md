@@ -44,9 +44,8 @@ Keys live server-side in `backend/.env` only.
 | `/` | `MaterialPage` | Topic input + file upload → `/materials/extract` → `/plan/scope` → `/plan/build`. |
 | `/concepts` | `ConceptPage` | The generated classes, as a mermaid map. Pick one to teach. |
 | `/study` | `StudyPage` | The teaching session: notes, AI-student sidebar, mic. |
-| `/progress` | `ProgressPage` | Per-class readiness across every stored path. |
 | `/summary` | `SummaryPage` | Post-class transfer-delta result (polls the analysis job). |
-| `/map` | `KnowledgeMapPage` | All growth paths. |
+| `/map` | `KnowledgeMapPage` | Every growth path, and the way into any class. |
 | `*` | `NotFoundPage` | |
 
 ## Talking to the backend
@@ -68,7 +67,8 @@ Browser flow, end to end:
 2. `POST /plan/scope` — confirm the topic, or pick one of 3 narrower options.
 3. `POST /plan/build` — persists the growth path. `GET /plan`, `GET /plan/{id}` and
    `GET /plan/{id}/memory` restore the UI after a refresh.
-4. `POST /plan/{id}/class/{cid}/notes` — teacher's notes, generated lazily per class.
+4. `POST /plan/{id}/class/{cid}/notes` — teacher's notes; written by the build, so this only
+   spends a call for an older path or with `?regenerate=true`.
 5. Teaching happens in the live classroom. You arm the mic once and talk; `useContinuousRecorder`
    closes an utterance after a 3 s pause and posts it to `.../teach/audio-turn` with `silent=true`,
    so the chunk is transcribed and analyzed but nobody interrupts unless they have a real question.

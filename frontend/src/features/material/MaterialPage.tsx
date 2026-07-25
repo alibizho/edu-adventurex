@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../../app/routes";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { StatusBar } from "../../components/layout/StatusBar";
+import { GeneratingTopics } from "./components/GeneratingTopics";
 import { MaterialEntryPanel } from "./components/MaterialEntryPanel";
 import { MATERIAL_PAGE_CONTENT, SURPRISE_TOPICS } from "./material.data";
 import type { MaterialInputStatus } from "./material.types";
@@ -35,6 +36,21 @@ export function MaterialPage() {
     if (prompt) materialInput.updateText(prompt);
   }
 
+  if (materialInput.pipeline.length > 0) {
+    return (
+      <div className="screen material-screen">
+        <AppHeader />
+        <main className="material-main">
+          <GeneratingTopics lines={materialInput.pipeline} />
+
+        </main>
+
+        <StatusBar label="BUILDING YOUR COURSE" />
+      </div>
+
+    );
+  }
+
   return (
     <div className="screen material-screen">
       <AppHeader />
@@ -54,15 +70,17 @@ export function MaterialPage() {
           onSubmit={materialInput.submit}
         />
 
-        <p className="material-hint">{MATERIAL_PAGE_CONTENT.hint}</p>
         {materialInput.warnings.length > 0 && (
           <div className="material-api-notice" role="status">
             {materialInput.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+
           </div>
+
         )}
         {materialInput.scopeSuggestions.length > 0 && (
           <section className="material-scope retro-panel" aria-labelledby="scope-title">
             <h2 id="scope-title">CHOOSE A FOCUSED LEARNING PATH</h2>
+
             <div>
               {materialInput.scopeSuggestions.map((suggestion) => (
                 <button
@@ -72,11 +90,16 @@ export function MaterialPage() {
                   onClick={() => materialInput.buildConfirmedTopic(suggestion.topic, suggestion.suggested_classes)}
                 >
                   <strong>{suggestion.topic}</strong>
+
                   <span>{suggestion.rationale}</span>
+
                 </button>
+
               ))}
             </div>
+
           </section>
+
         )}
         <div className="material-shortcuts" aria-label="Suggested learning topics">
           {MATERIAL_PAGE_CONTENT.shortcuts.map((shortcut, index) => (
@@ -89,10 +112,15 @@ export function MaterialPage() {
             >
               {shortcut.label}
             </button>
+
           ))}
         </div>
+
       </main>
+
       <StatusBar label={STATUS_LABELS[materialInput.status]} />
+
     </div>
+
   );
 }

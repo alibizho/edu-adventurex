@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { apiMessage } from "../learning-data/apiClient";
 import { backendLearningDataSource } from "../learning-data/backendLearningDataSource";
-import type { GrowthPath, ScopeSuggestion } from "../learning-data/backend.types";
+import type { BuildEvent, GrowthPath, ScopeSuggestion } from "../learning-data/backend.types";
 import type {
   MaterialFileKind,
   MaterialInputStatus,
@@ -65,6 +65,31 @@ type UseMaterialInputOptions = {
   onPrepared: (path: GrowthPath) => void;
 };
 
+function pipelineLines(event: BuildEvent): string[] {
+  switch (event.stage) {
+    case "topic":
+      return [
+        `[PIPELINE] CONFIRMED TOPIC: ${event.topic.toUpperCase()}`,
+        `[PIPELINE] CLASSES: ${event.classes}`,
+        "",
+      ];
+    case "structuring":
+      return [`[AGENT 2] STRUCTURING ${event.classes} CLASSES FOR: ${event.topic.toUpperCase()}`, ""];
+    case "class":
+      return [`  [${event.index}/${event.total}] ${event.title.toUpperCase()}`];
+    case "writing":
+      return ["", `[AGENT 3] WRITING NOTES FOR ${event.total} CLASSES...`];
+    case "written":
+      return [
+        `  [${event.index}/${event.total}] ${event.title.toUpperCase()}${event.ok ? "" : " -- FAILED, WILL RETRY ON OPEN"}`,
+      ];
+    case "done":
+      return ["", `[PIPELINE] COURSE READY: ${event.path.path_id}`];
+    case "error":
+      return ["", `[PIPELINE] ERROR: ${event.message}`];
+  }
+}
+
 export function useMaterialInput({ onPrepared }: UseMaterialInputOptions) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<SelectedMaterialFile[]>([]);
@@ -72,6 +97,7 @@ export function useMaterialInput({ onPrepared }: UseMaterialInputOptions) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [scopeSuggestions, setScopeSuggestions] = useState<ScopeSuggestion[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pipeline, setPipeline] = useState<string[]>([]);
   const preparedMaterial = useRef<{ originalInput: string; materialText: string | null } | null>(null);
 
   const hasMaterial = text.trim().length > 0 || files.length > 0;
@@ -122,16 +148,18 @@ export function useMaterialInput({ onPrepared }: UseMaterialInputOptions) {
     if (!prepared || isProcessing) return;
     setIsProcessing(true);
     setError(null);
+    setPipeline([]);
     try {
-      const path = await backendLearningDataSource.buildPlan({
+      const path = await backendLearningDataSource.buildPlanStream({
         originalInput: prepared.originalInput,
         confirmedTopic: topic,
         numClasses: suggestedClasses,
         materialText: prepared.materialText,
-      });
+      }, (event) => setPipeline((current) => [...current, ...pipelineLines(event)]));
       onPrepared(path);
     } catch (caught) {
       setError(apiMessage(caught));
+      setPipeline([]);
       setIsProcessing(false);
     }
   }
@@ -172,6 +200,7 @@ export function useMaterialInput({ onPrepared }: UseMaterialInputOptions) {
     error,
     warnings,
     scopeSuggestions,
+    pipeline,
     isProcessing,
     canSubmit: hasMaterial && !isProcessing,
     status,

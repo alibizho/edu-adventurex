@@ -81,6 +81,7 @@ transferred and fuses it with the confusion signal.
 | POST | `/questions/from_chunk` | multipart form | `ChunkQuestionResponse` | **Flow A:** audio chunk → (maybe) a question. |
 | POST | `/confusion/analyze` | multipart form | `ChunkAnalysis` | Audio chunk → analysis, optional GPU question, and curriculum update. |
 | POST | `/plan/{path_id}/class/{class_id}/teach/audio-turn` | multipart form | `AudioClassTeachResponse` | Context-aware audio teaching turn used by the frontend. `silent=true` records + analyzes the chunk but only speaks to ask (see LEARN_BY_TEACHING.md). |
+| POST | `/plan/{path_id}/class/{class_id}/reset` | — | `PathMemory` | "Start this class over": erases the class's session (speech, analyses, question ledger) and its progress, and takes back the concepts and questions it contributed to cross-class memory. The plan and teacher's notes are untouched. |
 | POST | `/confusion/ingest` | JSON `IngestRequest` | `{session_id, n_chunks}` | Bulk-store precomputed analyses. |
 | POST | `/confusion/mock` | `?session_id=` | `{session_id, n_chunks}` | Text-only heuristic analyses (no GPU). |
 | POST | `/measure` | `?session_id=` | `RunResult` | Transfer-delta measurement (slow). |

@@ -1,8 +1,9 @@
-import { apiRequest } from "./apiClient";
+import { ApiError, apiRequest, apiStream } from "./apiClient";
 import type {
   AnalysisStatus,
   AudioClassTeachResponse,
   BackendHealth,
+  BuildEvent,
   ClassTeachResponse,
   ClassUnit,
   GrowthPath,
@@ -11,7 +12,7 @@ import type {
   SessionSnapshot,
   TopicScope,
 } from "./backend.types";
-import type { SpeechProsody } from "../study/useContinuousRecorder";
+import type { SpeechProsody } from "../study/usePressToTalkRecorder";
 
 function segment(value: string) {
   return encodeURIComponent(value);
@@ -19,9 +20,6 @@ function segment(value: string) {
 
 export const backendLearningDataSource = {
   health: () => apiRequest<BackendHealth>("/health", {}, 6_000),
-  // Must stay above the backend's own ml_service_health_timeout: this probe crosses a tunnel to a
-  // rented GPU box and measures 4-8s. At 7s it timed out intermittently and the class dropped to
-  // "GPU VOICE ANALYSIS OFFLINE" with the engine up and healthy.
   confusionHealth: () => apiRequest<{ reachable: boolean; error?: string }>("/confusion/health", {}, 25_000),
 
   extractMaterials(files: readonly File[]) {
@@ -49,6 +47,30 @@ export const backendLearningDataSource = {
     }, 180_000);
   },
 
+  async buildPlanStream(
+    input: { originalInput: string; confirmedTopic: string; numClasses: number; materialText: string | null },
+    onEvent: (event: BuildEvent) => void,
+  ): Promise<GrowthPath> {
+    let built: GrowthPath | null = null;
+    let failure: string | null = null;
+    await apiStream<BuildEvent>("/plan/build/stream", {
+      method: "POST",
+      body: JSON.stringify({
+        original_input: input.originalInput,
+        confirmed_topic: input.confirmedTopic,
+        num_classes: input.numClasses,
+        material_text: input.materialText,
+      }),
+    }, (event) => {
+      if (event.stage === "done") built = event.path;
+      if (event.stage === "error") failure = event.message;
+      onEvent(event);
+    });
+    if (failure) throw new ApiError(failure, 502);
+    if (!built) throw new ApiError("THE BUILD ENDED BEFORE THE COURSE WAS READY.", 0);
+    return built;
+  },
+
   listPaths: () => apiRequest<GrowthPath[]>("/plan", {}, 30_000),
   getPath: (pathId: string) => apiRequest<GrowthPath>(`/plan/${segment(pathId)}`),
   getMemory: (pathId: string) => apiRequest<PathMemory>(`/plan/${segment(pathId)}/memory`),
@@ -66,11 +88,6 @@ export const backendLearningDataSource = {
     );
   },
 
-  /**
-   * `silent` is the live-classroom mode: the chunk is still transcribed, stored and analyzed, but
-   * the class only speaks if a question fires. Pass false in the one-to-one zoom, where the
-   * student is answering you directly and is expected to say something back.
-   */
   teachAudio(
     pathId: string,
     classId: string,
@@ -85,13 +102,9 @@ export const backendLearningDataSource = {
     form.append("chunk_id", String(chunkId));
     form.append("history", JSON.stringify(history));
     form.append("silent", String(silent));
-    // Answering one student face to face: the backend grades this against the question's answer
-    // key and may come back with a follow-up instead of accepting whatever was said.
     if (answeringQuestionId !== undefined) {
       form.append("answering_question_id", String(answeringQuestionId));
     }
-    // How it sounded. The GPU can't see hesitation that runs through a whole utterance, so the
-    // recorder measures pauses and dead air directly (see useContinuousRecorder.ts).
     if (prosody) {
       Object.entries(prosody).forEach(([key, value]) => form.append(key, String(value)));
     }
@@ -103,12 +116,19 @@ export const backendLearningDataSource = {
     );
   },
 
-  /** Records the teacher's answer so the question agent won't probe the same gap again. */
   answerQuestion(sessionId: string, questionId: number, answer: string) {
     return apiRequest<{ recorded: boolean }>("/questions/answer", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, question_id: questionId, answer }),
     }, 30_000);
+  },
+
+  resetClass(pathId: string, classId: string) {
+    return apiRequest<PathMemory>(
+      `/plan/${segment(pathId)}/class/${segment(classId)}/reset`,
+      { method: "POST" },
+      30_000,
+    );
   },
 
   endClass(pathId: string, classId: string, completionMode: "self-teaching" | "guided-explanation") {

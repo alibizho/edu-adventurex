@@ -1,10 +1,3 @@
-"""Ensemble scoring + delta math (report §4.4–4.5).
-
-Taught arm (transcript in context) and cold arm (no transcript, control) both answer the
-surviving questions closed-book. Delta = mean(taught) - mean(cold), per question and overall.
-Negative delta == teaching made the learner worse. Correctness comes from the verifier
-(grade_answer), which checks each answer against the question's ground-truth key.
-"""
 import asyncio
 
 from ..agents.personas import cold_personas, taught_personas, taught_system
@@ -14,7 +7,6 @@ from ..llm import student_chat
 from ..schemas import Arm, Question, QuestionDelta, RunResult, Score, Segment
 from .attribution import parse_citations
 from .grading import grade_answer
-
 
 async def _answer(
     system: str, question: Question, persona: str, arm: Arm, sem: asyncio.Semaphore,
@@ -31,7 +23,6 @@ async def _answer(
         not_covered=not_covered,
         cited_segment_ids=parse_citations(ans),
     )
-
 
 async def score_ensemble(
     transcript: list[Segment],
@@ -59,7 +50,6 @@ async def score_ensemble(
         per_question=per_question,
     )
     return result, scores
-
 
 def _deltas(questions: list[Question], scores: list[Score]) -> list[QuestionDelta]:
     out: list[QuestionDelta] = []

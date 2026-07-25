@@ -1,9 +1,3 @@
-"""Correctness check. The verifier NEVER scores the child — it compares a persona's answer to
-the question's ANSWER KEY (ground truth). Style, fluency and length are ignored; only whether
-the answer conveys the key's essential claim matters.
-
-`NOT COVERED` is graded incorrect but reported separately (a gap, not a wrong answer).
-"""
 from typing import Protocol
 
 from ..agents.prompts import VERIFIER_SYSTEM
@@ -11,29 +5,19 @@ from ..llm import verifier_chat
 
 NOT_COVERED = "NOT COVERED"
 
-
 class Gradable(Protocol):
-    """Anything with a question and a ground-truth key.
-
-    Both `Question` (offline measurement) and `TargetedQuestion` (live class) satisfy this, which
-    is what lets the live teaching loop reuse the verifier instead of growing a second one.
-    """
     text: str
     answer_key: str | None
-
 
 def is_not_covered(answer: str) -> bool:
     return NOT_COVERED.lower() in answer.strip().lower()[:40]
 
-
 async def grade_answer(persona_answer: str, question: Gradable) -> tuple[bool, bool]:
-    """Return (correct, not_covered). Verifier compares the answer to `question.answer_key` only."""
     if is_not_covered(persona_answer):
         return False, True
 
     key = (question.answer_key or "").strip()
     if not key:
-        # No key to grade against — cannot credit. Surfaces as a data problem in the harness.
         return False, False
 
     user = (

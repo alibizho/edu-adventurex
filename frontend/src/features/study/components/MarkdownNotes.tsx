@@ -34,12 +34,16 @@ export function MarkdownNotes({ source }: { source: string }) {
             const language = /language-(\w+)/.exec(className ?? "")?.[1];
             const text = String(children).replace(/\n$/, "");
             if (language === "mermaid") return <MermaidBlock source={text} />;
+
             return <code className={className} {...props}>{children}</code>;
+
           },
         }}
       >
         {source}
       </ReactMarkdown>
+
     </div>
+
   );
 }

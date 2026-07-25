@@ -1,4 +1,3 @@
-"""Contract tests for the standalone GPU service and the main backend boundary."""
 from __future__ import annotations
 
 import os
@@ -12,7 +11,6 @@ import server as gpu_server
 from app import schemas as app_schemas
 from app.store.db import _analysis_values, _row_to_analysis
 
-
 CONTRACT_MODELS = (
     "Anomaly",
     "WordScore",
@@ -21,22 +19,13 @@ CONTRACT_MODELS = (
     "ChunkAnalysis",
 )
 
-
 def _field_contract(model: type) -> dict[str, tuple[bool, object, object]]:
     return {
         name: (field.is_required(), field.default, field.default_factory)
         for name, field in model.model_fields.items()
     }
 
-
 def test_every_field_the_gpu_sends_is_read_the_same_way_by_the_backend():
-    """The wire invariant, which is a subset relation rather than equality.
-
-    Everything the GPU emits must land on an identically-shaped backend field — same
-    required-ness, same default. The backend may carry *extra* fields the GPU never sends:
-    `prosody` is measured in the browser and `gpu_confidence` is written after fusion, so
-    requiring the GPU's schema to declare them would be a lie about what the box produces.
-    """
     for model_name in CONTRACT_MODELS:
         gpu_fields = _field_contract(getattr(gpu_schemas, model_name))
         app_fields = _field_contract(getattr(app_schemas, model_name))
@@ -45,17 +34,13 @@ def test_every_field_the_gpu_sends_is_read_the_same_way_by_the_backend():
         for name, shape in gpu_fields.items():
             assert app_fields[name] == shape, f"{model_name}.{name} disagrees"
 
-
 def test_backend_only_fields_are_optional_so_a_gpu_payload_still_validates():
-    """The corollary: the extra backend fields must never be required, or every real response
-    from the box would fail validation."""
     gpu_only = set(_field_contract(app_schemas.ChunkAnalysis)) - set(
         _field_contract(gpu_schemas.ChunkAnalysis)
     )
     assert gpu_only == {"prosody", "gpu_confidence"}
     for name in gpu_only:
         assert not app_schemas.ChunkAnalysis.model_fields[name].is_required()
-
 
 def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
     captured: dict[str, object] = {}
@@ -125,11 +110,9 @@ def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
     assert captured["key_concepts"] == ["measurement", "superposition"]
     assert captured["overall_topic"] == "Quantum Physics"
     assert captured["curriculum_context"] == "Observer effect notes"
-    # The struggle ledger's current weak spot, stripped like the other free-text fields.
     assert captured["focus_target"] == "wave function collapse"
     assert captured["existed_during_analysis"] is True
     assert not os.path.exists(str(captured["audio_path"]))
-
 
 def test_analysis_database_boundary_round_trips_new_fields():
     analysis = app_schemas.ChunkAnalysis(

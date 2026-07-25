@@ -27,8 +27,15 @@
   .lobby-module-card {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: clamp(16px, 1.45vw, 25px);
     padding: 20px clamp(20px, 1.9vw, 34px);
+    text-align: center;
+  }
+
+  .lobby-module-card > div {
+    min-width: 0;
+    overflow-wrap: break-word;
   }
 
   .lobby-module-icon {
@@ -55,7 +62,6 @@
   .lobby-module-card p {
     margin: 7px 0 0;
     font-size: clamp(11px, 1vw, 17px);
-    white-space: nowrap;
   }
 
   .lobby-progress-card {
@@ -130,23 +136,18 @@
 
   .classroom-viewport {
     width: 100%;
+    aspect-ratio: 2.5;
     overflow: hidden;
     border: 3px solid var(--ink);
     background: var(--paper);
   }
 
-  .is-tutorial-open .classroom-viewport {
-    aspect-ratio: 2.42;
-  }
-
-  .is-tutorial-collapsed .classroom-viewport {
-    aspect-ratio: 1.82;
-  }
-
   .classroom-scene {
+    --window: .74;
+    --zoom: 2.2;
     position: relative;
     width: 100%;
-    height: 100%;
+    aspect-ratio: 1.85;
     transform: translate(0, 0) scale(1);
     transform-origin: center;
     will-change: transform;
@@ -155,55 +156,58 @@
   .classroom-scene.is-zooming {
     transition: transform 520ms steps(7, end);
     pointer-events: none;
+    transform:
+      translate(
+        calc((.5 - var(--seat-x)) * var(--zoom) * 100%),
+        calc((var(--window) * .5 - .5 - (var(--seat-y) - .5) * var(--zoom)) * 100%)
+      )
+      scale(var(--zoom));
   }
 
-  /* One camera move per seat, matching classroom.seats.ts. Hand-tuned against the art rather than
-     computed — the students aren't on an exact grid. */
-  .classroom-scene.is-zooming.focus-back-left   { transform: translate(26%, 14%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 16%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-back-right  { transform: translate(-24%, 14%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-left  { transform: translate(26%, -6%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -4%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-right { transform: translate(-24%, -6%) scale(2.2); }
-
-  .classroom-scene > img {
+  .classroom-backdrop {
     width: 100%;
     height: 100%;
     display: block;
     image-rendering: pixelated;
   }
 
-  .is-tutorial-open .classroom-scene > img {
-    object-fit: cover;
-    object-position: center 24%;
-  }
-
-  .is-tutorial-collapsed .classroom-scene > img {
-    object-fit: fill;
-    object-position: center;
-  }
-
-  .classroom-board-copy {
+  .classroom-seat {
+    --unit: .066%;
+    --overhang: 0%;
     position: absolute;
-    top: 8%;
-    left: 50%;
-    width: 36%;
-    transform: translateX(-50%);
-    display: grid;
-    gap: clamp(3px, .5vw, 10px);
-    color: var(--paper);
-    font-size: clamp(12px, 1.45vw, 26px);
-    line-height: 1.15;
-    text-align: center;
-    pointer-events: none;
+    z-index: 1;
+    width: calc(129 * var(--unit));
+    transform: translate(-50%, var(--overhang));
   }
 
-  /* A raised hand. `left`/`top` arrive as inline styles from classroom.seats.ts so the seat
-     coordinates live in one place; everything visual stays here. */
+  .classroom-seat--idle { --overhang: 13.7%; }
+
+  .classroom-seat--handup {
+    width: calc(116 * var(--unit));
+    --overhang: .9%;
+  }
+
+  .classroom-seat--sleeping {
+    width: calc(142 * var(--unit));
+    --overhang: 24.5%;
+  }
+
+  .classroom-seat > img {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    filter:
+      drop-shadow(1px 0 0 var(--paper)) drop-shadow(-1px 0 0 var(--paper))
+      drop-shadow(0 1px 0 var(--paper)) drop-shadow(0 -1px 0 var(--paper));
+  }
+
   .student-question {
     position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
     z-index: 2;
-    width: clamp(40px, 4.4vw, 72px);
+    width: clamp(28px, 3vw, 48px);
     aspect-ratio: 1.1;
     display: grid;
     place-items: center;
@@ -214,29 +218,28 @@
     font-size: clamp(30px, 3.6vw, 58px);
     line-height: 1;
     cursor: pointer;
+    transform: translateX(-50%);
     transform-origin: bottom center;
-    /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
-       "waiting for you". steps() keeps it in the pixel idiom instead of easing smoothly. */
     animation:
       hand-pop 240ms steps(4, end) 1,
       hand-jump 1100ms steps(3, end) 240ms infinite;
   }
 
   @keyframes hand-pop {
-    from { transform: translateY(14px) scale(.4); opacity: 0; }
-    to   { transform: translateY(0) scale(1); opacity: 1; }
+    from { transform: translate(-50%, 14px) scale(.4); opacity: 0; }
+    to   { transform: translate(-50%, 0) scale(1); opacity: 1; }
   }
 
   @keyframes hand-jump {
-    0%, 55%, 100% { transform: translateY(0); }
-    65%           { transform: translateY(-24%); }
-    80%           { transform: translateY(-10%); }
+    0%, 55%, 100% { transform: translate(-50%, 0); }
+    65%           { transform: translate(-50%, -24%); }
+    80%           { transform: translate(-50%, -10%); }
   }
 
   .student-question::after {
     content: "";
     position: absolute;
-    left: 10px;
+    left: calc(50% - 10px);
     bottom: -15px;
     width: 19px;
     height: 19px;
@@ -569,41 +572,29 @@
       flex-basis: 42px;
     }
 
-    .is-tutorial-open .classroom-viewport {
-      aspect-ratio: 1.55;
+    .classroom-viewport {
+      aspect-ratio: 2;
     }
 
-    .is-tutorial-collapsed .classroom-viewport {
-      aspect-ratio: 1.24;
-    }
-
-    .classroom-board-copy {
-      top: 8%;
-      width: 42%;
-      gap: 2px;
-      font-size: 8px;
+    .classroom-scene {
+      --window: .925;
+      --zoom: 1.7;
     }
 
     .student-question {
       width: 34px;
       border-width: 3px;
       font-size: 26px;
+      bottom: calc(100% + 6px);
     }
 
     .student-question::after {
+      left: calc(50% - 8px);
       bottom: -12px;
       width: 15px;
       height: 15px;
       border-width: 3px;
     }
-
-    /* Gentler push-in on a phone: 2.2x off a narrow viewport crops the student out of frame. */
-    .classroom-scene.is-zooming.focus-back-left   { transform: translate(20%, 11%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 12%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-back-right  { transform: translate(-18%, 11%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-left  { transform: translate(20%, -4%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -3%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-right { transform: translate(-18%, -4%) scale(1.7); }
 
     .tutorial-drawer {
       margin-top: 18px;
@@ -653,8 +644,6 @@
     }
   }
 
-  /* --- class goals checklist --- */
-
   .objective-list {
     display: grid;
     gap: 7px;
@@ -699,8 +688,6 @@
     opacity: .8;
   }
 
-  /* --- "am I doing well?" — the answer the room used to keep to itself --- */
-
   .classroom-banner {
     margin: 0 0 12px;
     padding: 8px 14px;
@@ -741,21 +728,61 @@
     transition: width 200ms steps(8, end);
   }
 
-  /* --- live teaching controls (mic, level meter, last-heard line) --- */
+  .classroom-explanation {
+    display: flex;
+    align-items: flex-start;
+    gap: clamp(12px, 1.6vw, 22px);
+    width: min(90ch, 100%);
+    margin: 16px auto 0;
+    padding: clamp(14px, 1.5vw, 20px);
+    border: 4px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink);
+    background: var(--paper);
+  }
+
+  .classroom-explanation-bot svg {
+    width: clamp(38px, 3.4vw, 56px);
+    height: clamp(38px, 3.4vw, 56px);
+    display: block;
+  }
+
+  .classroom-explanation-body { flex: 1; min-width: 0; }
+
+  .classroom-explanation-body strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: clamp(11px, 1.05vw, 14px);
+    letter-spacing: .5px;
+  }
+
+  .classroom-explanation-body p {
+    margin: 0;
+    font-size: clamp(13px, 1.15vw, 16px);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .classroom-explanation .outline-action {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 6px 16px;
+    font-size: 13px;
+  }
 
   .classroom-controls {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: clamp(12px, 2vw, 28px);
+    gap: clamp(10px, 1.2vw, 16px);
     margin-top: 14px;
   }
 
   .classroom-status {
     display: grid;
     gap: 6px;
-    min-width: min(46ch, 60vw);
+    width: min(60ch, 92vw);
     font-size: clamp(10px, 1.1vw, 14px);
+    text-align: center;
   }
 
   .mic-meter {
@@ -765,12 +792,9 @@
   }
 
   .mic-meter-fill {
-    /* The recorder writes this width imperatively (see useContinuousRecorder's meterRef), so the
-       resting state has to be declared here rather than inherited from a React style prop. */
     width: 0;
     height: 100%;
     background: var(--ink);
-    /* steps() so the meter ticks in blocks like everything else, not a smooth slider. */
     transition: width 90ms steps(6, end);
   }
 
@@ -788,8 +812,35 @@
     display: block;
   }
 
-  /* Covered every objective — the button says so and earns some weight, but is never the only
-     way out of the class. */
+  .classroom-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(10px, 1.6vw, 20px);
+    margin-top: 16px;
+  }
+
+  .classroom-actions .classroom-finish {
+    margin: 0;
+  }
+
+  .classroom-reset {
+    min-height: 48px;
+    padding: 8px 20px;
+    font-size: clamp(12px, 1.2vw, 15px);
+  }
+
+  .classroom-reset.is-confirming {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .classroom-reset:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+  }
+
   .classroom-finish.is-mastered {
     box-shadow: 7px 7px 0 var(--ink);
     transform: scale(1.04);
@@ -809,7 +860,6 @@
       transform: none;
     }
 
-    /* The marker still has to appear — it just doesn't bounce. */
     .student-question {
       animation: none;
     }

@@ -58,6 +58,7 @@ export function MaterialEntryPanel({
         <Search className="entry-search-icon" size={42} strokeWidth={3} aria-hidden="true" />
         <div className="entry-content">
           <label className="material-file-input" htmlFor="material-text">Learning material text</label>
+
           <textarea
             id="material-text"
             className="entry-textarea"
@@ -73,10 +74,13 @@ export function MaterialEntryPanel({
               {files.map(({ id, file, kind }) => (
                 <li key={id} className="selected-material">
                   <span className="selected-material-kind">{kind === "image" ? "IMAGE" : "FILE"}</span>
+
                   <span className="selected-material-details">
                     <span className="selected-material-name" title={file.name}>{file.name}</span>
+
                     <span className="selected-material-meta">{getFileType(file)} / {formatFileSize(file.size)}</span>
                   </span>
+
                   <button
                     type="button"
                     className="remove-material"
@@ -86,13 +90,18 @@ export function MaterialEntryPanel({
                   >
                     <X size={20} strokeWidth={3} aria-hidden="true" />
                   </button>
+
                 </li>
+
               ))}
             </ul>
+
           )}
 
           {error && <p id="material-entry-error" className="entry-error" role="alert">{error}</p>}
+
         </div>
+
       </div>
 
       <input
@@ -105,6 +114,7 @@ export function MaterialEntryPanel({
         aria-label="Choose PDF or text files"
         onChange={(event) => handleFileChange("document", event)}
       />
+
       <input
         ref={imageInput}
         className="material-file-input"
@@ -121,14 +131,20 @@ export function MaterialEntryPanel({
           <button type="button" className="outline-action" disabled={isProcessing} onClick={() => documentInput.current?.click()}>
             <Upload size={24} strokeWidth={2.5} aria-hidden="true" />{content.uploadLabel}
           </button>
+
           <button type="button" className="outline-action" disabled={isProcessing} onClick={() => imageInput.current?.click()}>
             <ImagePlus size={24} strokeWidth={2.5} aria-hidden="true" />{content.imageLabel}
           </button>
+
         </div>
+
         <button type="submit" className="solid-action" disabled={!canSubmit}>
           {isProcessing ? "PREPARING..." : content.startLabel}
         </button>
+
       </div>
+
     </form>
+
   );
 }

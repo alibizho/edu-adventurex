@@ -11,7 +11,7 @@ type StudentSidebarProps = {
 };
 
 function StudyToolIcon({ toolId }: { toolId: StudyToolId }) {
-  if (toolId === "progress") return <ArrowUpRight size={26} strokeWidth={3} aria-hidden="true" />;
+  if (toolId === "map") return <ArrowUpRight size={26} strokeWidth={3} aria-hidden="true" />;
   if (toolId === "tutorial") return <CircleHelp size={27} strokeWidth={3} aria-hidden="true" />;
   return <RotateCcw size={27} strokeWidth={3} aria-hidden="true" />;
 }
@@ -35,11 +35,16 @@ export function StudentSidebar({
             <PixelRobot />
           )}
         </div>
+
         <div>
           <strong>{student.name}</strong>
+
           <span>READINESS: {student.readiness}%</span>
+
         </div>
+
       </div>
+
       <div
         className="readiness-track"
         role="progressbar"
@@ -49,18 +54,26 @@ export function StudentSidebar({
         aria-valuenow={readiness}
       >
         <div className="readiness-fill" style={{ width: `${readiness}%` }} />
+
       </div>
+
       <nav className="side-nav" aria-label="Study tools">
         <div className="side-nav-actions">
           {tools.map((tool) => (
             <button key={tool.id} type="button" onClick={() => onToolAction(tool.id)}>
               <StudyToolIcon toolId={tool.id} />
+
               {tool.label}
             </button>
+
           ))}
         </div>
+
         <p className="study-tool-message" role="status" aria-live="polite">{message ?? ""}</p>
+
       </nav>
+
     </aside>
+
   );
 }

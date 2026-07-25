@@ -126,12 +126,15 @@ export function TeachingWorkspace({
         aria-live="polite"
       >
         <p>{isExplanation ? unknownHelp?.explanation : latestQuestion}</p>
+
       </div>
 
       {(displayState === "unknown-response" || displayState === "opening-book") && unknownHelp && (
         <div className="teacher-response" role="status" aria-live="polite">
           <p>{unknownHelp.response}</p>
+
         </div>
+
       )}
 
       <p className="sr-only" role="status" aria-live="polite">
@@ -151,9 +154,13 @@ export function TeachingWorkspace({
           >
             <PixelMicIcon />
           </button>
+
           <strong>{isListening ? "LISTENING..." : isComplete ? "SESSION COMPLETE" : "CLICK TO SPEAK"}</strong>
+
           <span>Voice input only: tone and pause analysis active.</span>
+
         </div>
+
       )}
 
       {isExplanation && unknownHelp && (
@@ -166,14 +173,17 @@ export function TeachingWorkspace({
         >
           {isCompleting ? "COMPLETING..." : unknownHelp.acknowledgementLabel}
         </button>
+
       )}
 
       {completionError && (
         <p className="conversation-completion-error" role="alert">{completionError}</p>
+
       )}
 
       <button type="button" className="back-to-material" disabled={isCompleting} onClick={handleBackToMaterial}>
         <span aria-hidden="true">←</span> BACK TO MATERIAL
+
       </button>
 
       <span className="conversation-turn" aria-label={`Teaching turn ${turnCount + 1}`}>
@@ -183,6 +193,8 @@ export function TeachingWorkspace({
       <div className="conversation-footer" aria-hidden="true">
         <i /><i /><i />
       </div>
+
     </section>
+
   );
 }

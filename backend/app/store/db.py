@@ -1,9 +1,3 @@
-"""Postgres-backed Store (async SQLAlchemy 2.0 + asyncpg). Durable across restarts. Selected when
-STORE_BACKEND=db and DATABASE_URL are set. Nested fields (anomalies, detail, per_question, scores)
-are JSONB; the schemas.py Pydantic models are the serialization boundary via .model_dump() /
-.model_validate(). Upserts use PostgreSQL ON CONFLICT so re-analyzing a chunk or re-measuring a
-session updates in place.
-"""
 import time
 
 from sqlalchemy import delete, select, text
@@ -41,7 +35,6 @@ from .models import (
     SessionRow,
 )
 
-
 def _analysis_values(session_id: str, a: ChunkAnalysis) -> dict:
     return {
         "session_id": session_id,
@@ -60,7 +53,6 @@ def _analysis_values(session_id: str, a: ChunkAnalysis) -> dict:
         "prosody": a.prosody.model_dump() if a.prosody is not None else None,
         "gpu_confidence": a.gpu_confidence,
     }
-
 
 def _row_to_analysis(row: AnalysisRow) -> ChunkAnalysis:
     return ChunkAnalysis(
@@ -84,7 +76,6 @@ def _row_to_analysis(row: AnalysisRow) -> ChunkAnalysis:
         gpu_confidence=row.gpu_confidence,
     )
 
-
 def _row_to_qa(row: QAEntryRow) -> QAEntry:
     return QAEntry(
         question=TargetedQuestion(
@@ -100,10 +91,7 @@ def _row_to_qa(row: QAEntryRow) -> QAEntry:
         answered_at=row.answered_at,
     )
 
-
 class DbStore:
-    """Store impl backed by Postgres. Each method opens its own short session (fine for the
-    hackathon's per-request granularity; the async engine pools connections underneath)."""
 
     def __init__(self, url: str):
         self._engine = create_async_engine(url, pool_pre_ping=True)
@@ -114,7 +102,6 @@ class DbStore:
     async def init(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            # create_all does not add columns to an existing MVP database.
             await conn.execute(
                 text("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS student_question JSONB")
             )
@@ -140,15 +127,18 @@ class DbStore:
     async def dispose(self) -> None:
         await self._engine.dispose()
 
+    async def clear_session(self, session_id: str) -> None:
+        async with self._sessionmaker() as s:
+            await s.execute(delete(AnalysisJobRow).where(AnalysisJobRow.session_id == session_id))
+            await s.execute(delete(SessionRow).where(SessionRow.session_id == session_id))
+            await s.commit()
+
     async def _ensure_session(self, s: AsyncSession, session_id: str) -> None:
-        """Insert a sessions row if absent (FK target for everything else). Race-safe upsert."""
         await s.execute(
             pg_insert(SessionRow)
             .values(session_id=session_id)
             .on_conflict_do_nothing(index_elements=["session_id"])
         )
-
-    # ---- transcript ----
 
     async def get_transcript(self, session_id: str) -> list[Segment]:
         async with self._sessionmaker() as s:
@@ -179,8 +169,6 @@ class DbStore:
             )
             await s.commit()
 
-    # ---- confusion analyses ----
-
     async def get_analyses(self, session_id: str) -> list[ChunkAnalysis]:
         async with self._sessionmaker() as s:
             rows = (
@@ -193,7 +181,6 @@ class DbStore:
             return [_row_to_analysis(r) for r in rows]
 
     async def append_analysis(self, session_id: str, analysis: ChunkAnalysis) -> None:
-        """Upsert by (session_id, chunk_id): a re-analyzed utterance updates in place."""
         async with self._sessionmaker() as s:
             await self._ensure_session(s, session_id)
             vals = _analysis_values(session_id, analysis)
@@ -221,7 +208,6 @@ class DbStore:
             await s.commit()
 
     async def set_analyses(self, session_id: str, analyses: list[ChunkAnalysis]) -> None:
-        """Replace all analyses for the session (used by /confusion/ingest and /confusion/mock)."""
         async with self._sessionmaker() as s:
             await self._ensure_session(s, session_id)
             await s.execute(
@@ -230,8 +216,6 @@ class DbStore:
             for a in analyses:
                 s.add(AnalysisRow(**_analysis_values(session_id, a)))
             await s.commit()
-
-    # ---- measurement run + raw scores ----
 
     async def set_run(self, session_id: str, result: RunResult, scores: list[Score]) -> None:
         vals = {
@@ -289,8 +273,6 @@ class DbStore:
                 return []
             return [Score.model_validate(sc) for sc in (row.scores or [])]
 
-    # ---- targeted-question ledger ----
-
     async def get_history(self, session_id: str) -> list[QAEntry]:
         async with self._sessionmaker() as s:
             rows = (
@@ -342,11 +324,6 @@ class DbStore:
             return _row_to_qa(row) if row else None
 
     async def thread_turns(self, session_id: str, question_id: int) -> int:
-        """How many answers this conversation thread has taken (see MemoryStore for the shape).
-
-        The ledger for one class is small, so resolving the chain in Python off get_history keeps
-        one implementation of the walk instead of a recursive CTE that could drift from it.
-        """
         return count_thread_answers(await self.get_history(session_id), question_id)
 
     async def record_answer(self, session_id: str, question_id: int, answer: str) -> bool:
@@ -378,8 +355,6 @@ class DbStore:
             ).scalars().all()
             return set(ids)
 
-    # ---- session topic ----
-
     async def set_topic(self, session_id: str, topic: str) -> None:
         async with self._sessionmaker() as s:
             await s.execute(
@@ -399,8 +374,6 @@ class DbStore:
                 )
             ).scalar_one_or_none()
             return topic or ""
-
-    # ---- learning plan (growth path) ----
 
     async def save_path(self, path: GrowthPath) -> None:
         async with self._sessionmaker() as s:
@@ -429,7 +402,6 @@ class DbStore:
             return [GrowthPath.model_validate(row.payload) for row in rows]
 
     async def save_class(self, path_id: str, cls: ClassUnit) -> None:
-        """Replace a class in the stored path (persists generated notes). Read-modify-write the blob."""
         path = await self.get_path(path_id)
         if path is None:
             return
@@ -438,8 +410,6 @@ class DbStore:
                 path.classes[i] = cls
                 break
         await self.save_path(path)
-
-    # ---- cross-class memory ----
 
     async def get_memory(self, path_id: str) -> PathMemory:
         async with self._sessionmaker() as s:
@@ -459,8 +429,6 @@ class DbStore:
                 .on_conflict_do_update(index_elements=["path_id"], set_={"payload": payload})
             )
             await s.commit()
-
-    # ---- asynchronous transfer analysis jobs ----
 
     async def get_analysis_job(self, session_id: str) -> AnalysisJob | None:
         async with self._sessionmaker() as s:

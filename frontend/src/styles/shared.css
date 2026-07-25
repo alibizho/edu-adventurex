@@ -32,7 +32,7 @@
     border: var(--line) solid var(--ink);
     background: var(--paper);
   }
-  .header-menu-button { padding: 0; cursor: pointer; }
+  .header-menu-button { display: none; padding: 0; cursor: pointer; }
   .header-menu-button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
   .pixel-robot { width: 100%; height: 100%; image-rendering: pixelated; }
@@ -81,6 +81,13 @@
     color: var(--paper);
   }
 
+  .discard-take {
+    min-height: 40px;
+    padding: 6px 16px;
+    box-shadow: none;
+    font-size: 14px;
+  }
+
   .status-bar {
     position: absolute;
     z-index: 30;
@@ -116,12 +123,6 @@
 
   .status-bar--full .status-label { border: 0; box-shadow: none; padding-left: 0; }
   .status-meta { margin-left: 18px; color: var(--muted); font-size: 13px; white-space: pre; }
-  .palette-indicator { margin-left: auto; display: flex; gap: 8px; }
-  .palette-indicator i { width: 38px; height: 38px; border: var(--line) solid var(--ink); }
-  .palette-indicator .tone-black { background: var(--ink); }
-  .palette-indicator .tone-gray { background: var(--gray); }
-  .palette-indicator .tone-white { background: var(--paper); }
-  .status-bar--full .palette-indicator i { width: 12px; height: 12px; border: 0; }
 
   .dashboard-title {
     width: fit-content;
@@ -171,6 +172,7 @@
     .app-header { gap: 24px; padding-inline: 16px; border-bottom-width: 5px; }
     .brand { font-size: 36px; }
     .primary-nav { display: none; }
+    .header-menu-button { display: grid; }
     .header-tools { gap: 10px; }
     .primary-nav.is-open {
       position: absolute;

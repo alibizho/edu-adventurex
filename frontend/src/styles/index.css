@@ -1,6 +1,7 @@
 @import "./foundation.css";
 @import "./shared.css";
 @import "./material.css";
+@import "./generating.css";
 @import "./concepts.css";
 @import "./study.css";
 @import "./lobby.css";
@@ -8,6 +9,5 @@
 @import "./session-exit.css";
 @import "./summary.css";
 @import "./knowledge-map.css";
-@import "./progress.css";
 @import "./not-found.css";
 @import "./cursor.css";
