@@ -7,100 +7,96 @@ students who heard the lesson against a control that didn't. That gap is the rea
 understanding. Cross it with how unsure the kid *sounded* while teaching, and a confident-but-wrong
 explanation becomes a visible **blind spot** — the thing no rubric can catch.
 
-## What's here
+## Folders
 
-```
-backend/     FastAPI service: the learn-by-teaching plan layer (scope → plan → teacher's notes →
-             teach → end, with cross-class memory), plus the teaching loop, transfer-delta
-             measurement, fusion, and real-time per-chunk questions. Calls the ml-service for
-             speech-confusion analysis. HTTP contract: backend/API.md;
-             learn-by-teaching guide: backend/LEARN_BY_TEACHING.md
-ml-service/  GPU confusion engine (Whisper ASR + Wav2Vec2/mDeBERTa/BGE + a judge LLM), deployed
-             on Hyper AI. Setup: ml-service/README.md
-frontend/    React + Vite UI — the pixel-art classroom. Drives the whole flow: upload material →
-             confirm the topic → build the plan → teach a class by voice → read the result.
-             Setup + route map: frontend/README.md
-```
+| Folder | What it is |
+|---|---|
+| `frontend/` | React + Vite UI (`:5173`). The pixel-art classroom: upload material → confirm the topic → build a plan → teach a class out loud → read the result. [Setup + route map](frontend/README.md) |
+| `backend/` | FastAPI service (`:8000`). Plans and teacher's notes, the live teaching turn, objective mastery, transfer-delta measurement, cross-class memory. [HTTP reference](backend/API.md) · [teaching flow](backend/LEARN_BY_TEACHING.md) |
+| `ml-service/` | GPU confusion engine (`:8100`), deployed on Hyper AI. Whisper ASR + Wav2Vec2/mDeBERTa + a judge LLM → per-utterance confidence. [Deploy guide](ml-service/README.md) |
+| `data/` | Local scratch for models and fixtures. Contents gitignored. |
 
-Three services, three processes. The frontend (:5173) talks only to the backend (:8000); only the
-backend talks to the ml-service (:8100), and it degrades gracefully when that box is down.
+Three processes. The frontend talks only to the backend; only the backend talks to the ml-service,
+and it degrades gracefully when that box is down.
 
-## Run
+## Run it
 
-**Backend** (local):
 ```bash
+# 1. database
+docker compose up -d db                       # Postgres on :5432
+
+# 2. backend
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # fill in LLM keys + ML_SERVICE_URL
-uvicorn app.main:app --port 8000
-# State is in-memory by default (lost on restart). For durable Postgres storage, set
-# STORE_BACKEND=db + DATABASE_URL in .env — or just use Docker (below).
+cp .env.example .env                          # add your LLM keys + ML_SERVICE_URL
+uvicorn app.main:app --reload --port 8000     # docs at /docs
+
+# 3. frontend (new terminal)
+cd frontend && npm install && npm run dev     # http://127.0.0.1:5173
 ```
-Interactive docs: http://localhost:8000/docs. Full endpoint reference: [backend/API.md](backend/API.md).
 
-PDF/image material extraction needs Tesseract on the box (`brew install tesseract`; the Docker
-image installs it). Without it, text and Markdown uploads still work.
+Notes:
 
-**Frontend** (local, needs the backend running):
-```bash
-cd frontend
-npm install
-npm run dev                   # http://127.0.0.1:5173
-```
-`http://127.0.0.1:5173` and `http://localhost:5173` are in the backend's `CORS_ORIGINS` default;
-serving the UI from anywhere else means adding that origin in `backend/.env`. Details:
-[frontend/README.md](frontend/README.md).
+- `.env.example` ships `STORE_BACKEND=db`, so plans, notes and progress survive a restart. Set
+  `STORE_BACKEND=memory` to run with no database — but every class is then regenerated, and
+  re-billed, after each reload. Tables are created on startup; there is no migration step.
+- The **ml-service** runs on a GPU box, not locally. Point the backend at it with `ML_SERVICE_URL`.
+  Without it, voice teaching returns `degraded: true` and the UI falls back to typing.
+- PDF/image uploads need Tesseract (`brew install tesseract`). Text and Markdown work without it.
+- Everything in one container instead: `docker compose up --build`.
 
-**ml-service** (Hyper AI GPU box): see [ml-service/README.md](ml-service/README.md). It must be
-running for the audio confusion endpoints (`/confusion/analyze`, `/questions/from_chunk`,
-`/plan/{id}/class/{cid}/teach/audio-turn`); point the backend at it with `ML_SERVICE_URL` in
-`backend/.env`. When it's unreachable the audio turn returns `degraded: true` and the UI falls back
-to text teaching rather than inventing a transcript.
+## How the pieces fit
 
-**Docker** (Postgres + backend, durable storage): put your LLM keys + the Hyper AI `ML_SERVICE_URL`
-in `backend/.env`, then:
-```bash
-docker compose up --build      # http://localhost:8000/docs
-```
-Runs `STORE_BACKEND=db`, so session context survives restarts. Inspect the DB with
-`docker compose exec db psql -U ts -d teachable`.
+1. `POST /materials/extract` — pull text out of uploaded PDFs, images or notes, in memory.
+2. `POST /plan/scope` → `POST /plan/build` — confirm or narrow the topic, then break it into ~5
+   classes, each with 3–5 **objectives** the learner must be able to explain out loud.
+3. `POST /plan/{id}/class/{cid}/notes` — a Markdown primer for the class, generated once and reused.
+4. Teaching: every pause ships one utterance to `.../teach/audio-turn`. It is transcribed, scored
+   for confusion, and checked against the objectives. The class stays quiet unless it has something
+   to ask — either about something that sounded shaky, or about a goal you haven't covered yet.
+5. `POST /plan/{id}/class/{cid}/end` — folds the class into cross-class memory so later classes
+   don't re-teach or re-ask.
+6. `POST /analysis/{session_id}` — the taught-vs-cold ensemble (transfer delta), crossed with how
+   confident the speech sounded into `blind_spot` / `aware_gap` / `productive_struggle` / `mastery`.
 
-## How it fits together
+## Contributing
 
-- **Learn-by-teaching plan (primary flow):** the learner names a topic → `POST /plan/scope`
-  confirms or narrows it → `POST /plan/build` makes a ~5-class plan → before each class
-  `POST /plan/{id}/class/{cid}/notes` generates a brief Markdown teacher's-notes primer → the
-  learner teaches via `POST /plan/{id}/class/{cid}/teach/turn` (the AI student replies, and a
-  targeted question fires only when the learner sounds unsure) → `POST /plan/{id}/class/{cid}/end`
-  folds the class into cross-class memory so later classes don't re-teach or re-ask. Full walkthrough
-  with real request/response examples: [backend/LEARN_BY_TEACHING.md](backend/LEARN_BY_TEACHING.md).
-- **Real-time spoken class:** the kid states a topic and teaches out loud. The frontend sends each
-  paused speech chunk to `POST /questions/from_chunk`; the ml-service analyzes it and the backend
-  generates a question only when the chunk sounded confused. (Uses the same confusion gate as the
-  plan teaching turn.)
-- **Measurement flow:** `POST /teach/turn` builds a transcript → `POST /measure` runs the
-  taught-vs-cold ensemble (transfer delta) → `GET /fusion/{id}` crosses disturbance × delta into
-  per-segment quadrants (`blind_spot` / `aware_gap` / `productive_struggle` / `mastery`).
+**Setup** — follow *Run it* above, then `pip install -r backend/requirements-dev.txt`.
 
-## Tests
+**Before you push:**
 
 ```bash
-cd backend && source .venv/bin/activate
-python -m pytest                             # unit + curriculum + workflow (hermetic, no LLM/DB)
+cd backend && source .venv/bin/activate && pytest -q     # 54 tests, hermetic: no LLM, no GPU, no DB
+cd frontend && npm run build                             # tsc -b + vite build
 ```
 
-DB round-trips (need a reachable Postgres at `$DATABASE_URL`):
-```bash
-DATABASE_URL=postgresql+asyncpg://ts:ts@localhost:5432/teachable PYTHONPATH=. \
-  python tests/test_db_roundtrip.py          # existing tables
-DATABASE_URL=postgresql+asyncpg://ts:ts@localhost:5432/teachable PYTHONPATH=. \
-  python tests/test_db_plan_roundtrip.py     # growth_paths + path_memory, incl. restart durability
-```
+**Where things go:**
+
+- Backend routes stay thin. Orchestration lives in `app/curriculum/` (plans, teaching, mastery),
+  `app/agents/` (the student and question writers) and `app/pipeline/` (measurement).
+- Every frontend backend call is declared in
+  `frontend/src/features/learning-data/backendLearningDataSource.ts` — add endpoints there, not
+  inline in components. `backend.types.ts` mirrors `backend/app/schemas.py`; change both together.
+- The backend and ml-service deploy separately and share no package, so
+  `backend/tests/test_ml_service_contract.py` asserts their schemas agree. It runs on CPU with no
+  torch — keep it that way.
+
+**Conventions:**
+
+- Tests are hermetic. Stub the LLM (see `_stub_llm` in `tests/test_workflow.py`) rather than
+  calling one; a test that needs network or a GPU doesn't belong in the suite.
+- Never put a key in a `VITE_*` variable — Vite inlines those into the browser bundle. Secrets live
+  in `backend/.env`, which is gitignored along with anything matching `.env.*`.
+- Tuning knobs go in `backend/app/config.py` with a default and a comment explaining the trade-off,
+  so they can be moved from `.env` without a code change.
 
 ## Status
 
-Running end-to-end against a live ml-service on Hyper AI and DeepSeek LLMs. The ml-service's
-confusion signals are still being tuned (its anomaly judges are noisy on short utterances), so the
-real-time question gate currently fires on low confidence + a lexical hesitation backstop rather
-than the raw anomaly flags — see [backend/API.md](backend/API.md) "Practical notes".
+Running end-to-end against a live ml-service on Hyper AI and DeepSeek LLMs.
+
+Known rough edge: the deployed GPU box predates the current `ml-service/` code. Until it is
+redeployed, word-level timings come back degenerate (`/health` reports `pace_degraded`), so
+hesitation is caught by the browser-measured prosody signal and a lexical backstop rather than by
+the acoustic model. `ABSOLUTE_DISSONANCE` in `ml-service/config.py` is uncalibrated and wants
+tuning against two real recordings — one confident, one hesitant.
