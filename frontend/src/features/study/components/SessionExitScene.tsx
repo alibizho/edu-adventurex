@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { PixelReturnIcon } from "../../../components/visuals/PixelIcons";
 import type { StudyModule } from "../study.types";
 
 const EXIT_DURATION_MS = 3600;
@@ -13,14 +14,6 @@ function PixelDocumentIcon() {
     <svg viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
       <path d="M13 4h28l11 11v45H13V4zm7 7v42h25V20H36v-9H20zm23 2 4 4h-4v-4z" fill="currentColor" />
       <path d="M25 25h15v5H25zm0 10h15v5H25zm0 10h11v5H25z" fill="var(--paper)" />
-    </svg>
-  );
-}
-
-function PixelReturnIcon() {
-  return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
-      <path d="M28 6 4 25l24 19V32h16v13H27v11h29V24H28V6z" fill="currentColor" />
     </svg>
   );
 }

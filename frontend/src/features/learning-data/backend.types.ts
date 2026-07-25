@@ -1,5 +1,6 @@
 export type BackendClassProgress = {
   status: "not_started" | "in_progress" | "complete";
+  /** % of this class's objectives actually covered — not a turn counter. */
   readiness: number;
   turn_count: number;
   started_at: number | null;
@@ -7,6 +8,11 @@ export type BackendClassProgress = {
   completion_mode: "self-teaching" | "guided-explanation" | null;
   analysis_status: "not_started" | "pending" | "running" | "complete" | "failed";
   analysis_error: string | null;
+  covered_objectives: string[];
+  /** objective id -> the sentence the learner said that earned it. */
+  objective_evidence: Record<string, string>;
+  /** Ended having covered everything, as opposed to just stopping. */
+  passed_on_mastery: boolean;
 };
 
 export type PathMemory = {
@@ -19,15 +25,27 @@ export type PathMemory = {
   class_progress: Record<string, BackendClassProgress>;
 };
 
+export type ClassObjective = {
+  id: string;
+  text: string;
+};
+
 export type ClassUnit = {
   class_id: string;
   title: string;
   objective: string;
+  /** The checkable breakdown. Empty on plans built before objectives existed. */
+  objectives: ClassObjective[];
   difficulty: string;
   prerequisites: string[];
   teacher_notes: string;
   notes_generated: boolean;
 };
+
+/** What the class is graded on. Mirrors `ClassUnit.checklist()` on the backend. */
+export function classChecklist(unit: ClassUnit): ClassObjective[] {
+  return unit.objectives.length > 0 ? unit.objectives : [{ id: "o1", text: unit.objective }];
+}
 
 export type GrowthPath = {
   path_id: string;
@@ -122,6 +140,8 @@ export type AudioClassTeachResponse = Omit<ClassTeachResponse, "new_segment"> & 
   new_segment: BackendSegment | null;
   analysis: ChunkAnalysis;
   degraded: boolean;
+  /** Nothing left to teach in this class — lets the UI distinguish "following you" from silence. */
+  all_goals_covered: boolean;
 };
 
 export type FusionSegment = {

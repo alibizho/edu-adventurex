@@ -5,7 +5,8 @@ import { AppHeader } from "../../components/layout/AppHeader";
 import { StatusBar } from "../../components/layout/StatusBar";
 import { apiMessage } from "../learning-data/apiClient";
 import { backendLearningDataSource } from "../learning-data/backendLearningDataSource";
-import { classSessionId, type AnalysisStatus, type GrowthPath, type PathMemory, type SessionSnapshot } from "../learning-data/backend.types";
+import { classChecklist, classSessionId, type AnalysisStatus, type GrowthPath, type PathMemory, type SessionSnapshot } from "../learning-data/backend.types";
+import { ObjectiveChecklist } from "../study/components/ObjectiveChecklist";
 import { StudentSidebar } from "../study/components/StudentSidebar";
 import type { StudyToolId } from "../study/study.types";
 
@@ -117,10 +118,12 @@ export function BackendSummaryPage({ pathId, classId }: { pathId: string; classI
                   const status = memory?.class_progress[item.class_id]?.status === "complete" ? "completed" : item.class_id === classId ? "next" : "locked";
                   return <div className={`growth-stop growth-stop--${status}`} key={item.class_id}>{status === "completed" && <span>COMPLETED</span>}<b>{status === "completed" ? "✓" : status === "next" ? "■" : "○"}</b><strong>{item.title}</strong></div>;
                 })}</div></section>
-                <section className="master-panel"><h2>★ MASTER STATUS</h2><p>{pending ? "TRANSFER ANALYSIS IS RUNNING IN THE BACKGROUND." : `YOU COMPLETED ${unit.title.toUpperCase()} WITH ${progress.readiness}% READINESS.`}</p><strong>RANK: {rank}</strong>{(analysis?.status === "failed" || (!analysis && !run)) && <button className="outline-action summary-retry" onClick={retryAnalysis}>RETRY ANALYSIS</button>}</section>
+                <section className="master-panel"><h2>★ MASTER STATUS</h2><p>{pending ? "TRANSFER ANALYSIS IS RUNNING IN THE BACKGROUND." : progress.passed_on_mastery ? `YOU EXPLAINED EVERY GOAL IN ${unit.title.toUpperCase()}.` : `YOU COVERED ${progress.readiness}% OF THE GOALS IN ${unit.title.toUpperCase()}.`}</p><strong>RANK: {rank}</strong>{(analysis?.status === "failed" || (!analysis && !run)) && <button className="outline-action summary-retry" onClick={retryAnalysis}>RETRY ANALYSIS</button>}</section>
               </div>
               <div className="summary-bottom-grid">
-                <section className="summary-panel mastery-panel"><h2>CONCEPTS MASTERED</h2><div className="mastery-grid">{metrics.map((metric) => <div className="mastery-item" key={metric.id}><span className="mastery-icon mastery-icon--circle"><i /></span><div><strong>{metric.label}</strong><span role="progressbar" aria-valuenow={metric.score} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${metric.score}%` }} /></span></div></div>)}</div></section>
+                {/* What they were asked to explain, and what they actually did explain — with the
+                    sentence that earned each tick, so the score is auditable rather than asserted. */}
+                <section className="summary-panel mastery-panel"><h2>CLASS GOALS</h2><ObjectiveChecklist objectives={classChecklist(unit)} covered={progress.covered_objectives} evidence={progress.objective_evidence} /></section>
                 <section className="summary-panel statistics-panel"><h2>TEACHING STATISTICS</h2><dl><div><dt>TEACHING TURNS</dt><dd>{progress.turn_count}</dd></div><div><dt>QUESTIONS RECORDED</dt><dd>{snapshot?.questions.length ?? 0}</dd></div><div><dt>GAPS DISCOVERED</dt><dd>{gapCount}</dd></div></dl></section>
               </div>
               {error && <p className="summary-api-error" role="alert">{error}</p>}

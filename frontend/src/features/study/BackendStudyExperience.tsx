@@ -1,18 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SessionCompletionMode, TeachingMessage } from "../../app/session.types";
 import { ROUTES } from "../../app/routes";
 import { AppHeader } from "../../components/layout/AppHeader";
-import { StatusBar } from "../../components/layout/StatusBar";
 import { apiMessage } from "../learning-data/apiClient";
 import { backendLearningDataSource } from "../learning-data/backendLearningDataSource";
-import { classSessionId, type ClassUnit, type GrowthPath, type PathMemory } from "../learning-data/backend.types";
+import {
+  classChecklist,
+  classSessionId,
+  type BackendClassProgress,
+  type ClassUnit,
+  type GrowthPath,
+  type TargetedQuestion,
+} from "../learning-data/backend.types";
+import { SEATS, seatName, type SeatId } from "./classroom.seats";
 import { BackendTeachingWorkspace } from "./components/BackendTeachingWorkspace";
+import { Classroom } from "./components/Classroom";
 import { MarkdownNotes } from "./components/MarkdownNotes";
 import { ModuleBanner } from "./components/ModuleBanner";
 import { SessionExitScene } from "./components/SessionExitScene";
 import { StudentSidebar } from "./components/StudentSidebar";
-import { TeachingLobby } from "./components/TeachingLobby";
+import { useContinuousRecorder, type SpeechProsody } from "./useContinuousRecorder";
 import type { StudyModule, StudyToolId } from "./study.types";
 
 const TOOLS = [
@@ -20,19 +28,9 @@ const TOOLS = [
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ] as const;
-const UNKNOWN_PATTERN = /\b(i\s*(do not|don't)\s*know|not\s*sure|no\s*idea|cannot\s*explain)\b/i;
 
 function message(speaker: TeachingMessage["speaker"], text: string): TeachingMessage {
   return { id: crypto.randomUUID(), speaker, text, createdAt: new Date().toISOString() };
-}
-
-function plainNotes(notes: string) {
-  return notes
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[#*_>`\[\]()!-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 1100);
 }
 
 function createVisualModule(path: GrowthPath, unit: ClassUnit): StudyModule {
@@ -63,22 +61,42 @@ function createVisualModule(path: GrowthPath, unit: ClassUnit): StudyModule {
   };
 }
 
+type RaisedHand = { seatId: SeatId; question: TargetedQuestion; askedAt: number };
+
 export function BackendStudyExperience({ pathId, classId }: { pathId: string; classId: string }) {
   const navigate = useNavigate();
   const [path, setPath] = useState<GrowthPath | null>(null);
   const [unit, setUnit] = useState<ClassUnit | null>(null);
-  const [memory, setMemory] = useState<PathMemory | null>(null);
-  const [phase, setPhase] = useState<"reading" | "lobby" | "teaching">("reading");
-  const [messages, setMessages] = useState<TeachingMessage[]>([]);
+  const [progress, setProgress] = useState<BackendClassProgress | null>(null);
+  const [phase, setPhase] = useState<"reading" | "classroom" | "zoom">("reading");
+  const [zoomSeat, setZoomSeat] = useState<SeatId | null>(null);
+  const [hands, setHands] = useState<RaisedHand[]>([]);
+  const [transcript, setTranscript] = useState<string[]>([]);
+  const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [turnCount, setTurnCount] = useState(0);
-  const [readiness, setReadiness] = useState(0);
+  // Readiness is NOT computed here any more. It is the share of class objectives the backend
+  // judged as actually explained; a local turn-count estimate would just disagree with it.
+  const readiness = progress?.readiness ?? 0;
+  const [queueDepth, setQueueDepth] = useState(0);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
+  const sessionId = classSessionId(pathId, classId);
+
+  // Recording and analysis run at different speeds: a chunk takes seconds to come back and the
+  // teacher keeps talking through it. Chunks queue here and drain one at a time — the GPU
+  // serializes anyway, so parallel uploads would only queue further downstream.
+  const queueRef = useRef<{ audio: Blob; prosody: SpeechProsody }[]>([]);
+  const drainingRef = useRef(false);
+  const chunkIdRef = useRef(0);
+  const transcriptRef = useRef<string[]>([]);
+  transcriptRef.current = transcript;
 
   useEffect(() => {
     let active = true;
@@ -96,14 +114,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
           ? selected
           : await backendLearningDataSource.generateNotes(pathId, classId);
         if (!active) return;
-        const progress = loadedMemory.class_progress[classId];
+        const loaded = loadedMemory.class_progress[classId] ?? null;
         setPath(loadedPath);
         setUnit(notes);
-        setMemory(loadedMemory);
-        setReadiness(progress?.readiness ?? 0);
-        setTurnCount(progress?.turn_count ?? 0);
+        setProgress(loaded);
+        setTurnCount(loaded?.turn_count ?? 0);
         setVoiceAvailable(Boolean(confusion.reachable));
-        setMessages([message("student", `CAN YOU TEACH ME ABOUT ${notes.title.toUpperCase()}?`)]);
         localStorage.setItem("wut:active-path", pathId);
         localStorage.setItem("wut:active-class", classId);
       })
@@ -112,26 +128,145 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     return () => { active = false; };
   }, [classId, pathId]);
 
-  const applyTurn = useCallback((teacherText: string, studentText: string) => {
-    setMessages((current) => [...current, message("teacher", teacherText), message("student", studentText)].slice(-41));
-    setTurnCount((current) => {
-      const next = current + 1;
-      setReadiness(Math.min(95, 25 + next * 15));
-      return next;
+  const refreshProgress = useCallback(async () => {
+    try {
+      const memory = await backendLearningDataSource.getMemory(pathId);
+      setProgress(memory.class_progress[classId] ?? null);
+    } catch {
+      // A missed poll just means the checklist updates on the next one.
+    }
+  }, [classId, pathId]);
+
+  // Objective coverage is judged in a background task, so it can't ride back on the teaching
+  // response. Poll for it while the class is live — a cheap DB read, no LLM.
+  useEffect(() => {
+    if (phase !== "classroom") return;
+    const timer = window.setInterval(() => void refreshProgress(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [phase, refreshProgress]);
+
+  /** Give a new question to whichever student isn't already holding one. */
+  const raiseHand = useCallback((question: TargetedQuestion) => {
+    setHands((current) => {
+      const taken = new Set(current.map((hand) => hand.seatId));
+      const free = SEATS.find((seat) => !taken.has(seat.id));
+      const entry = { question, askedAt: Date.now() };
+      if (free) return [...current, { seatId: free.id, ...entry }];
+      // Every seat is occupied: the teacher is talking past six unanswered questions. Retire the
+      // oldest — a stale probe about something said minutes ago is worth less than this one.
+      const oldest = current.reduce((a, b) => (a.askedAt <= b.askedAt ? a : b));
+      return [...current.filter((hand) => hand !== oldest), { seatId: oldest.seatId, ...entry }];
     });
-    return { teacherText, studentText };
   }, []);
 
-  async function teachText(answer: string) {
-    if (!unit || isBusy) return null;
+  const drain = useCallback(async () => {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    setIsBusy(true);
+    try {
+      while (queueRef.current.length > 0) {
+        const { audio, prosody } = queueRef.current.shift()!;
+        setQueueDepth(queueRef.current.length);
+        try {
+          const response = await backendLearningDataSource.teachAudio(
+            pathId, classId, audio, chunkIdRef.current, transcriptRef.current.slice(-6), true, prosody,
+          );
+          chunkIdRef.current += 1;
+          if (response.degraded || !response.analysis.text.trim()) {
+            setVoiceAvailable(false);
+            setError("GPU VOICE ANALYSIS IS OFFLINE — THE CLASS CANNOT HEAR YOU.");
+            continue;
+          }
+          const heard = response.analysis.text.trim();
+          setLastHeard(heard);
+          setLastConfidence(response.analysis.confidence);
+          setTranscript((current) => [...current, heard]);
+          setTurnCount((current) => current + 1);
+          const expanded = response.analysis.curriculum_update?.added_concepts ?? [];
+          if (expanded.length > 0) setToolMessage(`CURRICULUM EXPANDED: ${expanded.join(", ").toUpperCase()}`);
+          else if (response.analysis.anomalies.length > 0) {
+            setToolMessage(`LIVE ANALYSIS: ${response.analysis.anomalies.map(({ type }) => type.replaceAll("_", " ")).join(" / ").toUpperCase()}`);
+          } else setToolMessage("LIVE ANALYSIS: EXPLANATION CLEAR.");
+
+          if (response.asked && response.question) raiseHand(response.question);
+        } catch (caught) {
+          setError(apiMessage(caught));
+        }
+      }
+    } finally {
+      drainingRef.current = false;
+      setIsBusy(false);
+      setQueueDepth(0);
+      // The batch that just landed may have triggered a coverage check; pick it up without
+      // waiting for the next poll tick.
+      void refreshProgress();
+    }
+  }, [classId, pathId, raiseHand, refreshProgress]);
+
+  /** Typed fallback when the GPU is down. Same shape as a spoken chunk, minus the audio analysis. */
+  const teachText = useCallback(async (text: string) => {
     setIsBusy(true);
     setError(null);
     try {
-      const response = await backendLearningDataSource.teachText(pathId, classId, answer);
-      const studentText = UNKNOWN_PATTERN.test(answer)
-        ? plainNotes(unit.teacher_notes) || response.student_reply
-        : response.question?.text ?? response.student_reply;
-      return applyTurn(answer, studentText);
+      const response = await backendLearningDataSource.teachText(pathId, classId, text);
+      setLastHeard(text);
+      setTranscript((current) => [...current, text]);
+      setTurnCount((current) => current + 1);
+      if (response.asked && response.question) raiseHand(response.question);
+    } catch (caught) {
+      setError(apiMessage(caught));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [classId, pathId, raiseHand]);
+
+  const handleUtterance = useCallback((audio: Blob, prosody: SpeechProsody) => {
+    queueRef.current.push({ audio, prosody });
+    setQueueDepth(queueRef.current.length);
+    void drain();
+  }, [drain]);
+
+  const recorder = useContinuousRecorder({ onUtterance: handleUtterance });
+  const { disarm } = recorder;
+
+  // The mic belongs to the room. Entering a one-to-one conversation hands it to that view, and
+  // leaving the class entirely must not leave the browser recording indicator on.
+  useEffect(() => {
+    if (phase !== "classroom") disarm();
+  }, [phase, disarm]);
+
+  const zoomHand = hands.find((hand) => hand.seatId === zoomSeat) ?? null;
+
+  const resolveHand = useCallback((seatId: SeatId) => {
+    setHands((current) => current.filter((hand) => hand.seatId !== seatId));
+  }, []);
+
+  /** Shared tail of both answer paths: record it against the question, clear the hand. */
+  const settleHand = useCallback(async (hand: RaisedHand, answer: string, studentReply: string) => {
+    setTranscript((current) => [...current, answer]);
+    // Recording the answer is what stops the question agent probing this same gap again.
+    await backendLearningDataSource
+      .answerQuestion(sessionId, hand.question.id, answer)
+      .catch(() => undefined);
+    resolveHand(hand.seatId);
+    return { teacherText: answer, studentText: studentReply || "OH — THAT MAKES SENSE NOW!" };
+  }, [resolveHand, sessionId]);
+
+  async function answerZoomed(audio: Blob, prosody: SpeechProsody) {
+    if (!zoomHand) return null;
+    setIsBusy(true);
+    setError(null);
+    try {
+      // Not silent: this student asked you something directly and should answer back.
+      const response = await backendLearningDataSource.teachAudio(
+        pathId, classId, audio, chunkIdRef.current, transcriptRef.current.slice(-6), false, prosody,
+      );
+      chunkIdRef.current += 1;
+      if (response.degraded || !response.analysis.text.trim()) {
+        setError("GPU VOICE ANALYSIS IS OFFLINE — THE STUDENT COULD NOT HEAR YOU.");
+        return null;
+      }
+      return await settleHand(zoomHand, response.analysis.text.trim(), response.student_reply);
     } catch (caught) {
       setError(apiMessage(caught));
       return null;
@@ -140,35 +275,15 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     }
   }
 
-  async function teachAudio(audio: Blob) {
-    if (!unit || isBusy) return null;
+  async function answerZoomedText(text: string) {
+    if (!zoomHand) return null;
     setIsBusy(true);
     setError(null);
     try {
-      const history = messages.filter(({ speaker }) => speaker === "teacher").map(({ text }) => text);
-      const response = await backendLearningDataSource.teachAudio(pathId, classId, audio, turnCount, history);
-      if (response.degraded || !response.analysis.text.trim()) {
-        setVoiceAvailable(false);
-        setError("GPU VOICE ANALYSIS IS OFFLINE. TEXT INPUT HAS BEEN ENABLED.");
-        return null;
-      }
-      const teacherText = response.analysis.text.trim();
-      const expanded = response.analysis.curriculum_update?.added_concepts ?? [];
-      if (expanded.length > 0) {
-        setToolMessage(`CURRICULUM EXPANDED: ${expanded.join(", ").toUpperCase()}`);
-      } else if (response.analysis.anomalies.length > 0) {
-        const labels = response.analysis.anomalies.map(({ type }) => type.replaceAll("_", " "));
-        setToolMessage(`LIVE ANALYSIS: ${labels.join(" / ").toUpperCase()}`);
-      } else {
-        setToolMessage("LIVE ANALYSIS: EXPLANATION CLEAR.");
-      }
-      const studentText = UNKNOWN_PATTERN.test(teacherText)
-        ? plainNotes(unit.teacher_notes) || response.student_reply
-        : response.question?.text ?? response.student_reply;
-      return applyTurn(teacherText, studentText);
+      const response = await backendLearningDataSource.teachText(pathId, classId, text);
+      return await settleHand(zoomHand, text, response.student_reply);
     } catch (caught) {
-      setVoiceAvailable(false);
-      setError(`${apiMessage(caught)} TEXT INPUT HAS BEEN ENABLED.`);
+      setError(apiMessage(caught));
       return null;
     } finally {
       setIsBusy(false);
@@ -177,13 +292,13 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
 
   async function finish(completionMode: SessionCompletionMode) {
     if (isBusy) return false;
+    disarm();
     setIsBusy(true);
     setError(null);
     try {
       const updatedMemory = await backendLearningDataSource.endClass(pathId, classId, completionMode);
-      setMemory(updatedMemory);
-      setReadiness(100);
-      const sessionId = classSessionId(pathId, classId);
+      // Keep the readiness the learner earned — the backend no longer stamps 100 on every class.
+      setProgress(updatedMemory.class_progress[classId] ?? null);
       backendLearningDataSource.startAnalysis(sessionId).catch(() => undefined);
       setIsClosing(true);
       return true;
@@ -205,12 +320,16 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       return;
     }
     if (toolId === "tutorial") {
-      setToolMessage(phase === "reading" ? "TIP: READ THE MATERIAL, THEN SELECT READY TO TEACH." : "TIP: EXPLAIN THE IDEA IN YOUR OWN WORDS.");
+      setToolMessage("TIP: EXPLAIN THE IDEA IN YOUR OWN WORDS, THEN PAUSE.");
       return;
     }
     setPhase("reading");
-    setMessages([message("student", `CAN YOU TEACH ME ABOUT ${unit?.title.toUpperCase() ?? "THIS TOPIC"}?`)]);
     setToolMessage("LOCAL VIEW RESET. BACKEND HISTORY IS RETAINED.");
+  }
+
+  function toggleMic() {
+    if (recorder.isArmed) recorder.disarm();
+    else void recorder.arm();
   }
 
   if (isLoading) return <div className="screen study-screen"><AppHeader /><div className="backend-page-state retro-panel">GENERATING LEARNING MATERIAL...</div></div>;
@@ -218,37 +337,64 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     <div className="screen study-screen"><AppHeader /><div className="backend-page-state retro-panel" role="alert"><strong>LEARNING MATERIAL UNAVAILABLE</strong><p>{error}</p><button className="solid-action" onClick={() => navigate(ROUTES.material)}>BACK HOME</button></div></div>
   );
 
-  const isConversation = phase === "teaching";
+  const isZoom = phase === "zoom";
   return (
-    <div className={`screen study-screen${phase === "lobby" || isClosing ? " study-screen--lobby" : ""}${isConversation ? " study-screen--conversation" : ""}`}>
+    <div className={`screen study-screen${phase === "classroom" || isClosing ? " study-screen--lobby" : ""}${isZoom ? " study-screen--conversation" : ""}`}>
       <AppHeader />
       {isClosing ? (
         <SessionExitScene studyModule={visualModule} onComplete={handleExitComplete} />
-      ) : phase === "lobby" ? (
-        <TeachingLobby studyModule={visualModule} onReturnToReading={() => setPhase("reading")} onStartConversation={() => setPhase("teaching")} />
+      ) : phase === "classroom" ? (
+        <Classroom
+          studyModule={visualModule}
+          readiness={readiness}
+          objectives={classChecklist(unit)}
+          coveredObjectives={progress?.covered_objectives ?? []}
+          objectiveEvidence={progress?.objective_evidence ?? {}}
+          onReturnToReading={() => setPhase("reading")}
+          onEnterZoom={(seatId) => { setZoomSeat(seatId); setPhase("zoom"); }}
+          live={{
+            raisedHands: hands.map((hand) => hand.seatId),
+            recorderState: recorder.state,
+            level: recorder.level,
+            queueDepth,
+            isBusy,
+            lastHeard,
+            turnCount,
+            error: error ?? recorder.error,
+            voiceAvailable,
+            lastConfidence,
+            onToggleMic: toggleMic,
+            onTextAnswer: (text) => void teachText(text),
+            onFinish: () => void finish("self-teaching"),
+          }}
+        />
       ) : (
         <>
           <main className="study-layout">
             <StudentSidebar
-              student={{ name: "AI STUDENT", readiness }}
+              student={{ name: isZoom && zoomSeat ? seatName(zoomSeat) : "AI STUDENT", readiness }}
               tools={TOOLS}
               message={toolMessage}
               onToolAction={handleToolAction}
-              avatarVariant={isConversation ? "student" : "robot"}
+              avatarVariant={isZoom ? "student" : "robot"}
             />
-            <section className={isConversation ? "conversation-canvas" : "study-canvas halftone-screen"}>
-              {isConversation ? (
+            <section className={isZoom ? "conversation-canvas" : "study-canvas halftone-screen"}>
+              {isZoom && zoomHand ? (
                 <BackendTeachingWorkspace
-                  messages={messages}
-                  turnCount={turnCount}
-                  isVoiceAvailable={voiceAvailable}
+                  seatName={seatName(zoomHand.seatId)}
+                  question={zoomHand.question}
                   isBusy={isBusy}
                   error={error}
-                  onTextAnswer={teachText}
-                  onAudioAnswer={teachAudio}
-                  onFinish={finish}
-                  onBackToMaterial={() => setPhase("reading")}
+                  voiceAvailable={voiceAvailable}
+                  onAudioAnswer={answerZoomed}
+                  onTextAnswer={answerZoomedText}
+                  onBackToClass={() => { setZoomSeat(null); setPhase("classroom"); }}
                 />
+              ) : isZoom ? (
+                <div className="backend-page-state retro-panel">
+                  <strong>THAT QUESTION IS RESOLVED</strong>
+                  <button className="solid-action" onClick={() => { setZoomSeat(null); setPhase("classroom"); }}>BACK TO CLASS</button>
+                </div>
               ) : (
                 <>
                   <ModuleBanner label="CURRENT MODULE" title={path.confirmed_topic.toUpperCase()} />
@@ -257,13 +403,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
                     <h2>{unit.title.toUpperCase()}</h2>
                     <p>{unit.objective}</p>
                     <MarkdownNotes source={unit.teacher_notes} />
-                    <button type="button" className="solid-action ready-action" onClick={() => setPhase("lobby")}>READY TO TEACH</button>
+                    <button type="button" className="solid-action ready-action" onClick={() => setPhase("classroom")}>READY TO TEACH</button>
                   </article>
                 </>
               )}
             </section>
           </main>
-          {!isConversation && <StatusBar label="LEARNING_MATERIAL_PHASE" full meta={`PATH: ${path.path_id}`} />}
         </>
       )}
     </div>

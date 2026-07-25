@@ -11,6 +11,7 @@ import type {
   SessionSnapshot,
   TopicScope,
 } from "./backend.types";
+import type { SpeechProsody } from "../study/useContinuousRecorder";
 
 function segment(value: string) {
   return encodeURIComponent(value);
@@ -62,16 +63,43 @@ export const backendLearningDataSource = {
     );
   },
 
-  teachAudio(pathId: string, classId: string, audio: Blob, chunkId: number, history: string[]) {
+  /**
+   * `silent` is the live-classroom mode: the chunk is still transcribed, stored and analyzed, but
+   * the class only speaks if a question fires. Pass false in the one-to-one zoom, where the
+   * student is answering you directly and is expected to say something back.
+   */
+  teachAudio(
+    pathId: string,
+    classId: string,
+    audio: Blob,
+    chunkId: number,
+    history: string[],
+    silent = false,
+    prosody?: SpeechProsody,
+  ) {
     const form = new FormData();
     form.append("chunk_id", String(chunkId));
     form.append("history", JSON.stringify(history));
+    form.append("silent", String(silent));
+    // How it sounded. The GPU can't see hesitation that runs through a whole utterance, so the
+    // recorder measures pauses and dead air directly (see useContinuousRecorder.ts).
+    if (prosody) {
+      Object.entries(prosody).forEach(([key, value]) => form.append(key, String(value)));
+    }
     form.append("audio", audio, `chunk-${chunkId}.wav`);
     return apiRequest<AudioClassTeachResponse>(
       `/plan/${segment(pathId)}/class/${segment(classId)}/teach/audio-turn`,
       { method: "POST", body: form },
       120_000,
     );
+  },
+
+  /** Records the teacher's answer so the question agent won't probe the same gap again. */
+  answerQuestion(sessionId: string, questionId: number, answer: string) {
+    return apiRequest<{ recorded: boolean }>("/questions/answer", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, question_id: questionId, answer }),
+    }, 30_000);
   },
 
   endClass(pathId: string, classId: string, completionMode: "self-teaching" | "guided-explanation") {

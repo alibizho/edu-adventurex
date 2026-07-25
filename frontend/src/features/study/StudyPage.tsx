@@ -8,7 +8,7 @@ import { LearningDocument } from "./components/LearningDocument";
 import { ModuleBanner } from "./components/ModuleBanner";
 import { StudentSidebar } from "./components/StudentSidebar";
 import { SessionExitScene } from "./components/SessionExitScene";
-import { TeachingLobby } from "./components/TeachingLobby";
+import { Classroom } from "./components/Classroom";
 import { TeachingWorkspace } from "./components/TeachingWorkspace";
 import { getStudyModule, resolveStudyConceptId } from "./study.data";
 import type { StudyModule } from "./study.types";
@@ -54,10 +54,11 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
       {isClosing ? (
         <SessionExitScene studyModule={studyModule} onComplete={handleExitComplete} />
       ) : isLobby ? (
-        <TeachingLobby
+        <Classroom
           studyModule={studyModule}
+          readiness={session.student.readiness}
           onReturnToReading={session.returnToReading}
-          onStartConversation={session.startConversation}
+          onEnterZoom={session.startConversation}
         />
       ) : (
         <>

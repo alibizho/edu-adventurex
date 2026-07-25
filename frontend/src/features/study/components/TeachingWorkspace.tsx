@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PixelMicIcon } from "../../../components/visuals/PixelIcons";
 import type { TeachingMessage } from "../../../app/session.types";
 import type { UnknownHelpScenario } from "../study.types";
 
@@ -148,9 +149,7 @@ export function TeachingWorkspace({
             onClick={handleVoiceInput}
             aria-label={isListening ? "Listening" : "Start mock voice input"}
           >
-            <svg viewBox="0 0 48 48" aria-hidden="true" shapeRendering="crispEdges">
-              <path d="M18 7h12v4h4v17h-4v4H18v-4h-4V11h4zm2 4v17h8V11zM8 23h5v8h4v4h14v-4h4v-8h5v9h-4v4h-9v6h6v4H15v-4h7v-6h-9v-4H8z" />
-            </svg>
+            <PixelMicIcon />
           </button>
           <strong>{isListening ? "LISTENING..." : isComplete ? "SESSION COMPLETE" : "CLICK TO SPEAK"}</strong>
           <span>Voice input only: tone and pause analysis active.</span>

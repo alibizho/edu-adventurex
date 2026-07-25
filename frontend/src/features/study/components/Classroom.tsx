@@ -1,0 +1,423 @@
+import { useEffect, useState } from "react";
+import { PixelMicIcon, PixelReturnIcon } from "../../../components/visuals/PixelIcons";
+import { PixelRobot } from "../../../components/visuals/PixelRobot";
+import type { ClassObjective } from "../../learning-data/backend.types";
+import { SEATS, type SeatId } from "../classroom.seats";
+import type { RecorderState } from "../useContinuousRecorder";
+import type { StudyModule } from "../study.types";
+import { ObjectiveChecklist } from "./ObjectiveChecklist";
+
+type PixelIconProps = {
+  className?: string;
+};
+
+const ZOOM_DURATION = 520;
+
+/**
+ * Everything that only exists once a real class is running. Absent on the static fixture path,
+ * where the room is just a picker: every seat shows a `?` and clicking one starts the demo.
+ */
+type LiveSession = {
+  /** Seats whose student is waiting to ask something. Only these show a `?`. */
+  raisedHands: readonly SeatId[];
+  recorderState: RecorderState;
+  level: number;
+  queueDepth: number;
+  isBusy: boolean;
+  lastHeard: string | null;
+  turnCount: number;
+  error: string | null;
+  /** False when the GPU service is unreachable — the room falls back to typing. */
+  voiceAvailable: boolean;
+  /** Confidence of the last analyzed chunk, [0,1]. null before the first one lands. */
+  lastConfidence: number | null;
+  onToggleMic: () => void;
+  onTextAnswer: (text: string) => void;
+  onFinish: () => void;
+};
+
+type ClassroomProps = {
+  studyModule: StudyModule;
+  readiness: number;
+  /** The class's goals, and which of them the learner has demonstrably explained. */
+  objectives?: readonly ClassObjective[];
+  coveredObjectives?: readonly string[];
+  objectiveEvidence?: Record<string, string>;
+  onEnterZoom: (seatId: SeatId) => void;
+  onReturnToReading: () => void;
+  live?: LiveSession;
+};
+
+function PixelDocumentIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M13 4h28l11 11v45H13V4zm7 7v42h25V20H36v-9H20zm23 2 4 4h-4v-4z" fill="currentColor" />
+      <path d="M25 25h15v5H25zm0 10h15v5H25zm0 10h11v5H25z" fill="var(--paper)" />
+    </svg>
+  );
+}
+
+function PixelHandIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M8 28h13V16h8v8h7v5h7v5h7v17h-7v7H21v-6h-7v-7H8V28zm13 8h-6v5h6v5h8v5h14V36h-7v7h-7V24h-2v19h-6V36z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelQuestionIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M7 4h39v6h6v27H31l-9 10v-10H7V4zm7 7v19h13v6l6-6h12V11H14z" fill="currentColor" />
+      <path d="M26 14h9v4h5v8h-5v5h-7v-8h5v-3h-7v-6zm2 20h7v6h-7zM22 46h12v5h6v9H16v-9h6z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelSearchIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M10 7h29v5h7v7h5v21h-5v6h-7v5H18v-5h-7v-7H6V18h4V7zm8 7v5h-5v19h5v6h19v-5h7V20h-7v-6H18zm-2 34h8v7h-7v5H7v-8h9v-4z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelBookIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M4 9h23l5 5 5-5h23v42H39l-7 5-7-5H4V9zm7 7v28h16v-4H14v-5h13v-4H14v-5h13V16H11zm26 0v10h13v5H37v4h13v5H37v4h16V16H37z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelLightbulbIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M22 4h20v5h7v7h5v20h-5v7h-6v9H21v-9h-6v-7h-5V16h5V9h7V4zm2 8h-5v7h-4v14h5v6h7v8h10v-8h7v-6h5V19h-5v-7H24zm2 38h12v6H26zm3 8h6v4h-6z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelArrowIcon({ direction, className }: PixelIconProps & { direction: "left" | "right" }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" aria-hidden="true" shapeRendering="crispEdges">
+      <path d={direction === "left" ? "M28 12H13V6L3 16l10 10v-6h15v-8z" : "M4 12h15V6l10 10-10 10v-6H4v-8z"} fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelDownIcon({ className }: PixelIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" aria-hidden="true" shapeRendering="crispEdges">
+      <path d="M5 8h22L16 26 5 8z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SessionProgress({ readiness }: { readiness: number }) {
+  const filled = Math.round((Math.min(100, Math.max(0, readiness)) / 100) * 10);
+  return (
+    <div className="lobby-progress" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={readiness}>
+      <div className="lobby-progress-blocks" aria-hidden="true">
+        {Array.from({ length: 10 }, (_, index) => <i key={index} className={index < filled ? "is-filled" : ""} />)}
+      </div>
+      <strong>{readiness}%</strong>
+    </div>
+  );
+}
+
+
+function TutorialContent({ disabled, onCollapse }: { disabled: boolean; onCollapse: () => void }) {
+  return (
+    <div className="tutorial-content" id="teaching-tutorial-content">
+      <button
+        type="button"
+        className="tutorial-disclosure tutorial-disclosure--collapse"
+        aria-label="Collapse tutorial"
+        aria-expanded="true"
+        aria-controls="teaching-tutorial-content"
+        disabled={disabled}
+        onClick={onCollapse}
+      >
+        <PixelDownIcon />
+      </button>
+
+      <section className="tutorial-select">
+        <div className="tutorial-heading-row">
+          <div className="tutorial-bot"><PixelRobot /></div>
+          <div>
+            <h3>JUST START TALKING</h3>
+            <p>HIT THE MIC AND TEACH.<br />WHEN A STUDENT GETS LOST<br />A ? POPS UP — CLICK IT</p>
+          </div>
+        </div>
+        <div className="tutorial-ready"><PixelHandIcon /><span>WUT IS READY<br />TO LEARN!</span></div>
+      </section>
+
+      <section className="tutorial-how">
+        <h3><span />HOW IT WORKS<span /></h3>
+        <div className="tutorial-steps">
+          <div><PixelQuestionIcon /><span>WUT ASKS<br />QUESTIONS</span></div>
+          <PixelArrowIcon direction="right" className="tutorial-step-arrow" />
+          <div><PixelSearchIcon /><span>WE FIND<br />THE GAPS</span></div>
+          <PixelArrowIcon direction="right" className="tutorial-step-arrow" />
+          <div><PixelBookIcon /><span>YOU TEACH<br />BETTER</span></div>
+          <PixelArrowIcon direction="right" className="tutorial-step-arrow" />
+          <div><PixelRobot /><span>WUT<br />UNDERSTANDS</span></div>
+        </div>
+      </section>
+
+      <section className="tutorial-tips">
+        <h3><PixelLightbulbIcon />TIPS FOR TEACHERS</h3>
+        <ul>
+          <li>USE SIMPLE WORDS</li>
+          <li>GIVE REAL EXAMPLES</li>
+          <li>PAUSE WHEN YOU FINISH A THOUGHT</li>
+          <li>TAKE YOUR TIME!</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+/** Typing fallback for when the GPU box is unreachable. Losing voice must not mean losing class. */
+function ClassroomTextInput({ isBusy, onSend }: { isBusy: boolean; onSend: (text: string) => void }) {
+  const [draft, setDraft] = useState("");
+
+  function send() {
+    const trimmed = draft.trim();
+    if (!trimmed || isBusy) return;
+    setDraft("");
+    onSend(trimmed);
+  }
+
+  return (
+    <div className="backend-text-control classroom-text-control">
+      <label htmlFor="classroom-answer">GPU VOICE ANALYSIS OFFLINE — TYPE WHAT YOU WOULD SAY</label>
+      <textarea
+        id="classroom-answer"
+        value={draft}
+        maxLength={2000}
+        disabled={isBusy}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            send();
+          }
+        }}
+      />
+      <button type="button" className="solid-action" disabled={!draft.trim() || isBusy} onClick={send}>
+        {isBusy ? "SENDING..." : "TEACH THIS"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The one line that answers "am I doing well?".
+ *
+ * Before this the common case was total silence — no question, no reply, no reaction — which
+ * reads identically to a broken app. Every state below is something the room already knew and
+ * simply wasn't saying.
+ */
+function classStatus(
+  live: LiveSession,
+  openGoals: readonly ClassObjective[],
+  allCovered: boolean,
+): { text: string; tone: "clear" | "unsure" | "done" } {
+  if (live.raisedHands.length > 0) {
+    return { text: `${live.raisedHands.length} HAND${live.raisedHands.length > 1 ? "S" : ""} UP — CLICK THE ?`, tone: "unsure" };
+  }
+  if (live.lastConfidence !== null && live.lastConfidence < 0.5) {
+    return { text: "THAT SOUNDED UNSURE — SOMEONE WILL ASK", tone: "unsure" };
+  }
+  if (allCovered) return { text: "THE CLASS HAS IT — YOU CAN FINISH", tone: "done" };
+  if (openGoals.length > 0) {
+    return { text: `FOLLOWING YOU · ${openGoals.length} GOAL${openGoals.length > 1 ? "S" : ""} LEFT: ${openGoals[0].text}`, tone: "clear" };
+  }
+  return { text: "THE CLASS IS FOLLOWING", tone: "clear" };
+}
+
+function micCaption(state: RecorderState, isBusy: boolean, queueDepth: number) {
+  if (queueDepth > 3) return `FALLING BEHIND — ${queueDepth} CLIPS QUEUED`;
+  if (state === "idle") return isBusy ? "THINKING..." : "CLICK TO START TEACHING";
+  if (state === "calibrating") return "LISTENING TO THE ROOM...";
+  if (state === "speaking") return "HEARING YOU — PAUSE WHEN DONE";
+  return isBusy ? "THINKING..." : "LISTENING — JUST TALK";
+}
+
+export function Classroom({
+  studyModule,
+  readiness,
+  objectives = [],
+  coveredObjectives = [],
+  objectiveEvidence = {},
+  onEnterZoom,
+  onReturnToReading,
+  live,
+}: ClassroomProps) {
+  const [zoomingTo, setZoomingTo] = useState<SeatId | null>(null);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(true);
+
+  useEffect(() => {
+    if (!zoomingTo) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      onEnterZoom(zoomingTo);
+      return;
+    }
+    const timer = window.setTimeout(() => onEnterZoom(zoomingTo), ZOOM_DURATION);
+    return () => window.clearTimeout(timer);
+  }, [zoomingTo, onEnterZoom]);
+
+  const openGoals = objectives.filter((objective) => !coveredObjectives.includes(objective.id));
+  const allCovered = objectives.length > 0 && openGoals.length === 0;
+  const status = live ? classStatus(live, openGoals, allCovered) : null;
+  const raised = live ? live.raisedHands : SEATS.map((seat) => seat.id);
+  const isArmed = live ? live.recorderState !== "idle" : false;
+  // The meter saturates around a normal speaking level so quiet speech still moves it visibly.
+  const meter = Math.min(100, Math.round((live?.level ?? 0) * 900));
+
+  return (
+    <main className={`teaching-lobby ${isTutorialOpen ? "is-tutorial-open" : "is-tutorial-collapsed"}`}>
+      <section className="lobby-summary" aria-label="Teaching session overview">
+        <div className="lobby-summary-card lobby-module-card">
+          <PixelDocumentIcon className="lobby-module-icon" />
+          <div>
+            <span>CURRENT MODULE</span>
+            <h1>{studyModule.title}</h1>
+            <p>TOPIC: {studyModule.document.title}</p>
+          </div>
+        </div>
+
+        <div className="lobby-summary-card lobby-progress-card">
+          <span>{objectives.length > 0 ? "CLASS GOALS" : "SESSION PROGRESS"}</span>
+          <SessionProgress readiness={readiness} />
+          {objectives.length > 0 && (
+            <ObjectiveChecklist
+              objectives={objectives}
+              covered={coveredObjectives}
+              evidence={objectiveEvidence}
+            />
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="lobby-summary-card lobby-back-card"
+          disabled={Boolean(zoomingTo)}
+          onClick={onReturnToReading}
+        >
+          <PixelReturnIcon className="lobby-return-icon" />
+          <span>BACK TO<br />LEARNING MATERIAL</span>
+        </button>
+      </section>
+
+      {status && (
+        <p className={`classroom-banner classroom-banner--${status.tone}`} role="status" aria-live="polite">
+          {status.text}
+        </p>
+      )}
+
+      <section className="classroom-viewport" aria-label="Your classroom">
+        <div className={`classroom-scene${zoomingTo ? ` is-zooming focus-${zoomingTo}` : ""}`}>
+          <img src="/images/wut-classroom.png" alt="A pixel-art classroom with six students" />
+          <div className="classroom-board-copy" aria-hidden="true">
+            <span>TEACH WUT</span>
+            <span>HELP WUT UNDERSTAND</span>
+            <span>DISCOVER YOUR GAPS</span>
+          </div>
+          {SEATS.filter((seat) => raised.includes(seat.id)).map((seat) => (
+            <button
+              key={seat.id}
+              type="button"
+              className={`student-question student-question--${seat.id}`}
+              style={{ left: seat.marker.left, top: seat.marker.top }}
+              aria-label={`${seat.name} has a question — click to answer it`}
+              disabled={Boolean(zoomingTo)}
+              onClick={() => !zoomingTo && setZoomingTo(seat.id)}
+            >
+              ?
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Outside .classroom-viewport on purpose: that box is a fixed aspect-ratio window with
+          overflow:hidden, so anything after the scene gets clipped out of existence. */}
+      {live && (live.voiceAvailable ? (
+          <div className="classroom-controls">
+            <button
+              type="button"
+              className={`voice-button${live.recorderState === "speaking" ? " is-listening" : ""}${isArmed ? " is-armed" : ""}`}
+              aria-label={isArmed ? "Stop teaching" : "Start teaching"}
+              aria-pressed={isArmed}
+              onClick={live.onToggleMic}
+            >
+              <PixelMicIcon />
+            </button>
+            <div className="classroom-status">
+              <strong>{micCaption(live.recorderState, live.isBusy, live.queueDepth)}</strong>
+              {isArmed && (
+                <div className="mic-meter" aria-hidden="true">
+                  <div className="mic-meter-fill" style={{ width: `${meter}%` }} />
+                </div>
+              )}
+              {live.lastHeard && <span className="classroom-heard">“{live.lastHeard}”</span>}
+              {live.lastConfidence !== null && (
+                <div className="clarity-row">
+                  <span>CLARITY</span>
+                  <span className="clarity-track" aria-hidden="true">
+                    <i style={{ width: `${Math.round(live.lastConfidence * 100)}%` }} />
+                  </span>
+                  <span>{Math.round(live.lastConfidence * 100)}%</span>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <ClassroomTextInput isBusy={live.isBusy} onSend={live.onTextAnswer} />
+        ))}
+
+      <section className={`tutorial-drawer${isTutorialOpen ? " is-open" : " is-collapsed"}`} aria-label="Teaching tutorial">
+        {isTutorialOpen ? (
+          <TutorialContent disabled={Boolean(zoomingTo)} onCollapse={() => setIsTutorialOpen(false)} />
+        ) : (
+          <div className="tutorial-bar">
+            <span>TUTORIAL BAR</span>
+            <button
+              type="button"
+              className="tutorial-disclosure tutorial-disclosure--expand"
+              aria-label="Expand tutorial"
+              aria-expanded="false"
+              aria-controls="teaching-tutorial-content"
+              disabled={Boolean(zoomingTo)}
+              onClick={() => setIsTutorialOpen(true)}
+            >
+              <PixelArrowIcon direction="left" />
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Soft gate: finishing is always allowed. Covering everything changes what the button says
+          and how loud it is, rather than being the only way out — a learner whose phrasing the
+          judge missed must never be trapped in a class they already understand. */}
+      {live && live.turnCount > 0 && (
+        <button
+          type="button"
+          className={`classroom-finish solid-action${allCovered ? " is-mastered" : ""}`}
+          disabled={Boolean(zoomingTo)}
+          onClick={live.onFinish}
+        >
+          {allCovered ? "YOU'VE GOT IT — FINISH" : "FINISH TEACHING"}
+        </button>
+      )}
+
+      {live?.error && <p className="classroom-error" role="alert">{live.error}</p>}
+
+      <p className="sr-only" role="status" aria-live="polite">
+        {live && live.raisedHands.length > 0 ? `${live.raisedHands.length} student(s) have a question` : ""}
+      </p>
+    </main>
+  );
+}

@@ -157,13 +157,14 @@
     pointer-events: none;
   }
 
-  .classroom-scene.is-zooming.focus-left {
-    transform: translate(25%, -8%) scale(2.2);
-  }
-
-  .classroom-scene.is-zooming.focus-right {
-    transform: translate(-25%, -8%) scale(2.2);
-  }
+  /* One camera move per seat, matching classroom.seats.ts. Hand-tuned against the art rather than
+     computed — the students aren't on an exact grid. */
+  .classroom-scene.is-zooming.focus-back-left   { transform: translate(26%, 14%) scale(2.2); }
+  .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 16%) scale(2.2); }
+  .classroom-scene.is-zooming.focus-back-right  { transform: translate(-24%, 14%) scale(2.2); }
+  .classroom-scene.is-zooming.focus-front-left  { transform: translate(26%, -6%) scale(2.2); }
+  .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -4%) scale(2.2); }
+  .classroom-scene.is-zooming.focus-front-right { transform: translate(-24%, -6%) scale(2.2); }
 
   .classroom-scene > img {
     width: 100%;
@@ -197,11 +198,12 @@
     pointer-events: none;
   }
 
+  /* A raised hand. `left`/`top` arrive as inline styles from classroom.seats.ts so the seat
+     coordinates live in one place; everything visual stays here. */
   .student-question {
     position: absolute;
-    top: 24%;
     z-index: 2;
-    width: clamp(48px, 5.4vw, 86px);
+    width: clamp(40px, 4.4vw, 72px);
     aspect-ratio: 1.1;
     display: grid;
     place-items: center;
@@ -209,9 +211,26 @@
     border: 4px solid var(--ink);
     background: var(--paper);
     font-family: var(--font-display);
-    font-size: clamp(38px, 4.4vw, 70px);
+    font-size: clamp(30px, 3.6vw, 58px);
     line-height: 1;
     cursor: pointer;
+    transform-origin: bottom center;
+    /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
+       "waiting for you". steps() keeps it in the pixel idiom instead of easing smoothly. */
+    animation:
+      hand-pop 240ms steps(4, end) 1,
+      hand-jump 1100ms steps(3, end) 240ms infinite;
+  }
+
+  @keyframes hand-pop {
+    from { transform: translateY(14px) scale(.4); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+  }
+
+  @keyframes hand-jump {
+    0%, 55%, 100% { transform: translateY(0); }
+    65%           { transform: translateY(-24%); }
+    80%           { transform: translateY(-10%); }
   }
 
   .student-question::after {
@@ -225,14 +244,6 @@
     border-bottom: 4px solid var(--ink);
     background: var(--paper);
     transform: skewY(45deg);
-  }
-
-  .student-question--left {
-    left: 27%;
-  }
-
-  .student-question--right {
-    right: 17%;
   }
 
   .student-question:hover:not(:disabled) {
@@ -574,10 +585,9 @@
     }
 
     .student-question {
-      top: 25%;
-      width: 46px;
+      width: 34px;
       border-width: 3px;
-      font-size: 38px;
+      font-size: 26px;
     }
 
     .student-question::after {
@@ -587,21 +597,13 @@
       border-width: 3px;
     }
 
-    .student-question--left {
-      left: 25%;
-    }
-
-    .student-question--right {
-      right: 14%;
-    }
-
-    .classroom-scene.is-zooming.focus-left {
-      transform: translate(21%, -4%) scale(1.7);
-    }
-
-    .classroom-scene.is-zooming.focus-right {
-      transform: translate(-21%, -4%) scale(1.7);
-    }
+    /* Gentler push-in on a phone: 2.2x off a narrow viewport crops the student out of frame. */
+    .classroom-scene.is-zooming.focus-back-left   { transform: translate(20%, 11%) scale(1.7); }
+    .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 12%) scale(1.7); }
+    .classroom-scene.is-zooming.focus-back-right  { transform: translate(-18%, 11%) scale(1.7); }
+    .classroom-scene.is-zooming.focus-front-left  { transform: translate(20%, -4%) scale(1.7); }
+    .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -3%) scale(1.7); }
+    .classroom-scene.is-zooming.focus-front-right { transform: translate(-18%, -4%) scale(1.7); }
 
     .tutorial-drawer {
       margin-top: 18px;
@@ -651,11 +653,166 @@
     }
   }
 
+  /* --- class goals checklist --- */
+
+  .objective-list {
+    display: grid;
+    gap: 7px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: clamp(9px, .95vw, 12px);
+    line-height: 1.35;
+  }
+
+  .objective-list li {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 8px;
+    align-items: start;
+  }
+
+  .objective-box {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border: 3px solid var(--ink);
+    background: var(--paper);
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .objective-list li.is-covered .objective-box {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .objective-list li.is-covered .objective-text {
+    opacity: .62;
+  }
+
+  .objective-evidence {
+    display: block;
+    margin-top: 3px;
+    font-size: .9em;
+    opacity: .8;
+  }
+
+  /* --- "am I doing well?" — the answer the room used to keep to itself --- */
+
+  .classroom-banner {
+    margin: 0 0 12px;
+    padding: 8px 14px;
+    border: 4px solid var(--ink);
+    background: var(--paper);
+    font-size: clamp(10px, 1.1vw, 14px);
+    letter-spacing: 1px;
+    text-align: center;
+  }
+
+  .classroom-banner--unsure {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .classroom-banner--done {
+    box-shadow: 6px 6px 0 var(--ink);
+  }
+
+  .clarity-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    font-size: .95em;
+  }
+
+  .clarity-track {
+    height: 10px;
+    border: 3px solid var(--ink);
+    background: var(--paper);
+  }
+
+  .clarity-track > i {
+    display: block;
+    height: 100%;
+    background: var(--ink);
+    transition: width 200ms steps(8, end);
+  }
+
+  /* --- live teaching controls (mic, level meter, last-heard line) --- */
+
+  .classroom-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(12px, 2vw, 28px);
+    margin-top: 14px;
+  }
+
+  .classroom-status {
+    display: grid;
+    gap: 6px;
+    min-width: min(46ch, 60vw);
+    font-size: clamp(10px, 1.1vw, 14px);
+  }
+
+  .mic-meter {
+    height: 10px;
+    border: 3px solid var(--ink);
+    background: var(--paper);
+  }
+
+  .mic-meter-fill {
+    height: 100%;
+    background: var(--ink);
+    /* steps() so the meter ticks in blocks like everything else, not a smooth slider. */
+    transition: width 90ms steps(6, end);
+  }
+
+  .classroom-heard {
+    opacity: .75;
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .classroom-finish {
+    justify-self: center;
+    margin: 16px auto 0;
+    display: block;
+  }
+
+  /* Covered every objective — the button says so and earns some weight, but is never the only
+     way out of the class. */
+  .classroom-finish.is-mastered {
+    box-shadow: 7px 7px 0 var(--ink);
+    transform: scale(1.04);
+  }
+
+  .classroom-error {
+    margin: 12px auto 0;
+    max-width: 70ch;
+    text-align: center;
+    border: 3px solid var(--ink);
+    padding: 8px 12px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .classroom-scene.is-zooming {
       transition: none;
       transform: none;
     }
 
+    /* The marker still has to appear — it just doesn't bounce. */
+    .student-question {
+      animation: none;
+    }
+
+    .mic-meter-fill {
+      transition: none;
+    }
   }
 }

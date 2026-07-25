@@ -1,151 +1,129 @@
-import { useEffect, useRef, useState } from "react";
-import type { TeachingMessage } from "../../../app/session.types";
-import { useWavRecorder } from "../useWavRecorder";
-
-const UNKNOWN_PATTERN = /\b(i\s*(do not|don't)\s*know|not\s*sure|no\s*idea|cannot\s*explain)\b/i;
+import { useEffect, useState } from "react";
+import { PixelMicIcon } from "../../../components/visuals/PixelIcons";
+import type { TargetedQuestion } from "../../learning-data/backend.types";
+import { useContinuousRecorder, type SpeechProsody } from "../useContinuousRecorder";
 
 type TurnResult = { teacherText: string; studentText: string };
 
 type BackendTeachingWorkspaceProps = {
-  messages: readonly TeachingMessage[];
-  turnCount: number;
-  isVoiceAvailable: boolean;
+  seatName: string;
+  question: TargetedQuestion;
   isBusy: boolean;
   error: string | null;
-  onTextAnswer: (answer: string) => Promise<TurnResult | null>;
-  onAudioAnswer: (audio: Blob) => Promise<TurnResult | null>;
-  onFinish: (mode: "self-teaching" | "guided-explanation") => Promise<boolean>;
-  onBackToMaterial: () => void;
+  voiceAvailable: boolean;
+  onAudioAnswer: (audio: Blob, prosody: SpeechProsody) => Promise<TurnResult | null>;
+  onTextAnswer: (text: string) => Promise<TurnResult | null>;
+  onBackToClass: () => void;
 };
 
+/**
+ * One student, up close. You got here by clicking the `?` over their head, so there is exactly one
+ * thing to do: answer what they asked. The mic is armed on arrival — this is a conversation, not a
+ * form, and making the teacher hunt for a button breaks the momentum they had while teaching.
+ */
 export function BackendTeachingWorkspace({
-  messages,
-  turnCount,
-  isVoiceAvailable,
+  seatName,
+  question,
   isBusy,
   error,
-  onTextAnswer,
+  voiceAvailable,
   onAudioAnswer,
-  onFinish,
-  onBackToMaterial,
+  onTextAnswer,
+  onBackToClass,
 }: BackendTeachingWorkspaceProps) {
-  const [answer, setAnswer] = useState("");
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [displayState, setDisplayState] = useState<"question" | "opening-book" | "explanation">("question");
-  const [explanation, setExplanation] = useState("");
-  const timerRef = useRef<number | null>(null);
-  const recorder = useWavRecorder();
-  const latestQuestion = [...messages].reverse().find(({ speaker }) => speaker === "student")?.text
-    ?? "WHAT WOULD YOU LIKE TO TEACH ME?";
+  const [reply, setReply] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [draft, setDraft] = useState("");
 
-  useEffect(() => () => {
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-  }, []);
+  const recorder = useContinuousRecorder({
+    onUtterance: (audio, prosody) => {
+      if (isSending) return;
+      setIsSending(true);
+      void onAudioAnswer(audio, prosody)
+        .then((result) => { if (result) setReply(result.studentText); })
+        .finally(() => setIsSending(false));
+    },
+  });
 
-  function showTurn(result: TurnResult | null) {
-    if (!result || !UNKNOWN_PATTERN.test(result.teacherText)) return;
-    setExplanation(result.studentText);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setDisplayState("explanation");
-      return;
-    }
-    setDisplayState("opening-book");
-    timerRef.current = window.setTimeout(() => setDisplayState("explanation"), 1120);
+  const { arm, disarm } = recorder;
+  useEffect(() => {
+    if (!voiceAvailable) return;
+    void arm();
+    return disarm;
+  }, [arm, disarm, voiceAvailable]);
+
+  function sendText() {
+    const trimmed = draft.trim();
+    if (!trimmed || isSending) return;
+    setDraft("");
+    setIsSending(true);
+    void onTextAnswer(trimmed)
+      .then((result) => { if (result) setReply(result.studentText); })
+      .finally(() => setIsSending(false));
   }
 
-  async function submitText() {
-    const trimmed = answer.trim();
-    if (!trimmed || isBusy) return;
-    setAnswer("");
-    showTurn(await onTextAnswer(trimmed));
-  }
+  // Once they've understood, stop listening — otherwise the room keeps recording a teacher who has
+  // moved on and is now talking to someone else.
+  useEffect(() => { if (reply) disarm(); }, [reply, disarm]);
 
-  async function toggleRecording() {
-    if (isBusy) return;
-    if (!recorder.isRecording) {
-      await recorder.start();
-      return;
-    }
-    const audio = await recorder.stop();
-    if (audio) showTurn(await onAudioAnswer(audio));
-  }
+  const busy = isBusy || isSending;
+  const meter = Math.min(100, Math.round(recorder.level * 900));
 
-  async function finish(mode: "self-teaching" | "guided-explanation") {
-    setIsCompleting(true);
-    const completed = await onFinish(mode);
-    if (!completed) setIsCompleting(false);
-  }
-
-  const isExplanation = displayState === "explanation";
   return (
-    <section className={`conversation-stage conversation-stage--${displayState}`} aria-label="AI student conversation">
+    <section className="conversation-stage conversation-stage--question" aria-label={`Conversation with ${seatName}`}>
       <div className="conversation-character" aria-hidden="true">
-        {displayState === "opening-book" ? (
-          <div className="conversation-character-sprite is-opening-book" />
-        ) : isExplanation ? (
-          <div className="conversation-character-sprite is-holding-book" />
-        ) : (
-          <img src="/images/wut-student-fullbody.png" alt="" />
-        )}
+        <img src="/images/wut-student-fullbody.png" alt="" />
       </div>
 
-      <div className={`student-speech${isExplanation ? " student-speech--explanation" : ""}`} role="status" aria-live="polite">
-        <p>{isExplanation ? explanation : latestQuestion}</p>
+      <div className="student-speech" role="status" aria-live="polite">
+        <strong className="student-speech-name">{seatName}</strong>
+        <p>{reply ?? question.text}</p>
       </div>
 
-      {!isExplanation && (
-        isVoiceAvailable ? (
-          <div className="voice-control">
-            <button
-              type="button"
-              className={`voice-button${recorder.isRecording ? " is-listening" : ""}`}
-              disabled={isBusy}
-              onClick={toggleRecording}
-              aria-label={recorder.isRecording ? "Stop recording" : "Start recording"}
-            >
-              <svg viewBox="0 0 48 48" aria-hidden="true" shapeRendering="crispEdges">
-                <path d="M18 7h12v4h4v17h-4v4H18v-4h-4V11h4zm2 4v17h8V11zM8 23h5v8h4v4h14v-4h4v-8h5v9h-4v4h-9v6h6v4H15v-4h7v-6h-9v-4H8z" />
-              </svg>
-            </button>
-            <strong>{recorder.isRecording ? "CLICK TO STOP" : isBusy ? "PROCESSING..." : "CLICK TO SPEAK"}</strong>
-            <span>16KHZ WAV INPUT: TONE AND PAUSE ANALYSIS ACTIVE.</span>
+      {reply ? (
+        <button type="button" className="acknowledgement-button" onClick={onBackToClass}>
+          BACK TO CLASS
+        </button>
+      ) : !voiceAvailable ? (
+        <div className="backend-text-control">
+          <label htmlFor="zoom-answer">GPU VOICE ANALYSIS OFFLINE — TYPE YOUR ANSWER</label>
+          <textarea
+            id="zoom-answer"
+            value={draft}
+            maxLength={2000}
+            disabled={busy}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendText();
+              }
+            }}
+          />
+          <button type="button" className="solid-action" disabled={!draft.trim() || busy} onClick={sendText}>
+            {busy ? "SENDING..." : "ANSWER"}
+          </button>
+        </div>
+      ) : (
+        <div className="voice-control">
+          <div className={`voice-button is-armed${recorder.state === "speaking" ? " is-listening" : ""}`} aria-hidden="true">
+            <PixelMicIcon />
           </div>
-        ) : (
-          <div className="backend-text-control">
-            <label htmlFor="backend-teaching-answer">GPU VOICE ANALYSIS OFFLINE — TYPE YOUR EXPLANATION</label>
-            <textarea
-              id="backend-teaching-answer"
-              value={answer}
-              maxLength={2000}
-              disabled={isBusy}
-              onChange={(event) => setAnswer(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitText();
-                }
-              }}
-            />
-            <button type="button" className="solid-action" disabled={!answer.trim() || isBusy} onClick={submitText}>
-              {isBusy ? "SENDING..." : "SEND"}
-            </button>
+          <strong>
+            {busy ? "THINKING..."
+              : recorder.state === "calibrating" ? "LISTENING TO THE ROOM..."
+              : recorder.state === "speaking" ? "HEARING YOU — PAUSE WHEN DONE"
+              : "ANSWER OUT LOUD"}
+          </strong>
+          <div className="mic-meter" aria-hidden="true">
+            <div className="mic-meter-fill" style={{ width: `${meter}%` }} />
           </div>
-        )
+          {question.anomaly_type && <span>DETECTED: {question.anomaly_type.replaceAll("_", " ").toUpperCase()}</span>}
+        </div>
       )}
 
-      {isExplanation ? (
-        <button type="button" className="acknowledgement-button" disabled={isCompleting} onClick={() => finish("guided-explanation")}>
-          {isCompleting ? "COMPLETING..." : "I GOT IT!"}
-        </button>
-      ) : turnCount > 0 ? (
-        <button type="button" className="acknowledgement-button backend-finish-button" disabled={isBusy || isCompleting} onClick={() => finish("self-teaching")}>
-          {isCompleting ? "COMPLETING..." : "FINISH TEACHING"}
-        </button>
-      ) : null}
-
       {(error || recorder.error) && <p className="conversation-completion-error" role="alert">{error ?? recorder.error}</p>}
-      <button type="button" className="back-to-material" disabled={isBusy || isCompleting} onClick={onBackToMaterial}>← BACK TO MATERIAL</button>
-      <span className="conversation-turn">TURN {String(turnCount + 1).padStart(2, "0")}</span>
+      <button type="button" className="back-to-material" disabled={busy} onClick={onBackToClass}>← BACK TO CLASS</button>
       <div className="conversation-footer" aria-hidden="true"><i /><i /><i /></div>
     </section>
   );

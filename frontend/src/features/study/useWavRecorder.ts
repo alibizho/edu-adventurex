@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-function mergeBuffers(buffers: readonly Float32Array[]) {
+export function mergeBuffers(buffers: readonly Float32Array[]) {
   const length = buffers.reduce((total, buffer) => total + buffer.length, 0);
   const merged = new Float32Array(length);
   let offset = 0;
@@ -11,7 +11,7 @@ function mergeBuffers(buffers: readonly Float32Array[]) {
   return merged;
 }
 
-function downsample(input: Float32Array, sourceRate: number, targetRate = 16_000) {
+export function downsample(input: Float32Array, sourceRate: number, targetRate = 16_000) {
   if (sourceRate === targetRate) return input;
   const ratio = sourceRate / targetRate;
   const output = new Float32Array(Math.round(input.length / ratio));
@@ -25,7 +25,7 @@ function downsample(input: Float32Array, sourceRate: number, targetRate = 16_000
   return output;
 }
 
-function encodeWav(samples: Float32Array, sampleRate = 16_000) {
+export function encodeWav(samples: Float32Array, sampleRate = 16_000) {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
   const write = (offset: number, text: string) => {

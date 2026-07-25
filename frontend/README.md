@@ -70,9 +70,15 @@ Browser flow, end to end:
 3. `POST /plan/build` — persists the growth path. `GET /plan`, `GET /plan/{id}` and
    `GET /plan/{id}/memory` restore the UI after a refresh.
 4. `POST /plan/{id}/class/{cid}/notes` — teacher's notes, generated lazily per class.
-5. Teaching: text goes to `.../teach/turn`; recorded audio goes to `.../teach/audio-turn`, which
-   returns `degraded: true` when the GPU ml-service is unreachable — the UI then falls back to
-   text input rather than pretending the turn happened.
+5. Teaching happens in the live classroom. You arm the mic once and talk; `useContinuousRecorder`
+   closes an utterance after a 3 s pause and posts it to `.../teach/audio-turn` with `silent=true`,
+   so the chunk is transcribed and analyzed but nobody interrupts unless they have a real question.
+   Chunks queue and drain one at a time — you can keep talking through the upload.
+   When a question comes back, a `?` rises over one of the six seats (`classroom.seats.ts`).
+   Clicking it zooms to that student, where your answer goes up with `silent=false` and is recorded
+   against the question via `POST /questions/answer`.
+   `degraded: true` means the GPU ml-service is unreachable — the room falls back to typing rather
+   than pretending the turn happened.
 6. `POST /plan/{id}/class/{cid}/end` — idempotent; folds the class into cross-class memory.
 7. `POST /analysis/{session_id}` starts the transfer-delta measurement; `SummaryPage` polls
    `GET /analysis/{session_id}` until it is `complete` or `failed`.
