@@ -23,10 +23,12 @@ from ..schemas import (
     RunResult,
     Score,
     Segment,
+    SpeechProsody,
     StudentQuestion,
     TargetedQuestion,
     WordScore,
 )
+from .base import count_thread_answers
 from .models import (
     AnalysisJobRow,
     AnalysisRow,
@@ -55,6 +57,8 @@ def _analysis_values(session_id: str, a: ChunkAnalysis) -> dict:
         "curriculum_update": (
             a.curriculum_update.model_dump() if a.curriculum_update is not None else None
         ),
+        "prosody": a.prosody.model_dump() if a.prosody is not None else None,
+        "gpu_confidence": a.gpu_confidence,
     }
 
 
@@ -76,6 +80,8 @@ def _row_to_analysis(row: AnalysisRow) -> ChunkAnalysis:
             if row.curriculum_update
             else None
         ),
+        prosody=SpeechProsody.model_validate(row.prosody) if row.prosody else None,
+        gpu_confidence=row.gpu_confidence,
     )
 
 
@@ -87,6 +93,8 @@ def _row_to_qa(row: QAEntryRow) -> QAEntry:
             text=row.text,
             anomaly_type=row.anomaly_type,
             rationale=row.rationale,
+            answer_key=row.answer_key,
+            parent_id=row.parent_id,
         ),
         answer=row.answer,
         answered_at=row.answered_at,
@@ -112,6 +120,21 @@ class DbStore:
             )
             await conn.execute(
                 text("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS curriculum_update JSONB")
+            )
+            await conn.execute(
+                text("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS prosody JSONB")
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE analyses ADD COLUMN IF NOT EXISTS "
+                    "gpu_confidence DOUBLE PRECISION"
+                )
+            )
+            await conn.execute(
+                text("ALTER TABLE qa_entries ADD COLUMN IF NOT EXISTS answer_key TEXT")
+            )
+            await conn.execute(
+                text("ALTER TABLE qa_entries ADD COLUMN IF NOT EXISTS parent_id INTEGER")
             )
 
     async def dispose(self) -> None:
@@ -189,6 +212,8 @@ class DbStore:
                             "detail",
                             "student_question",
                             "curriculum_update",
+                            "prosody",
+                            "gpu_confidence",
                         )
                     },
                 )
@@ -298,9 +323,31 @@ class DbStore:
                         text=q.text,
                         anomaly_type=q.anomaly_type,
                         rationale=q.rationale,
+                        answer_key=q.answer_key,
+                        parent_id=q.parent_id,
                     )
                 )
             await s.commit()
+
+    async def find_question(self, session_id: str, question_id: int) -> QAEntry | None:
+        async with self._sessionmaker() as s:
+            row = (
+                await s.execute(
+                    select(QAEntryRow).where(
+                        QAEntryRow.session_id == session_id,
+                        QAEntryRow.question_id == question_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            return _row_to_qa(row) if row else None
+
+    async def thread_turns(self, session_id: str, question_id: int) -> int:
+        """How many answers this conversation thread has taken (see MemoryStore for the shape).
+
+        The ledger for one class is small, so resolving the chain in Python off get_history keeps
+        one implementation of the walk instead of a recursive CTE that could drift from it.
+        """
+        return count_thread_answers(await self.get_history(session_id), question_id)
 
     async def record_answer(self, session_id: str, question_id: int, answer: str) -> bool:
         async with self._sessionmaker() as s:

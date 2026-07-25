@@ -160,6 +160,11 @@ class TargetedQuestion(BaseModel):
     text: str
     anomaly_type: Optional[str] = None
     rationale: Optional[str] = None  # why the agent asked this (for debugging / UI)
+    # Ground truth for pipeline.grading.grade_answer. Without it an answer can only be checked for
+    # existence, which is how "uhh I dunno" used to count as understanding.
+    answer_key: Optional[str] = None
+    # The question this one follows up on, so a back-and-forth about one concept stays linked.
+    parent_id: Optional[int] = None
 
 
 class QAEntry(BaseModel):
@@ -247,6 +252,20 @@ class ClassProgressRecord(BaseModel):
     last_checked_segment: int = -1
     last_goal_probe_turn: int = -1      # throttles "you haven't covered X yet" nudges
     passed_on_mastery: bool = False     # ended having covered everything, vs just stopped
+    # Times the student stopped asking and told the learner the answer (they said "I don't know",
+    # or ran out of tries). Any of these makes the class `guided-explanation` rather than
+    # self-teaching, which is the difference between working it out and being told.
+    explanations_given: int = 0
+
+    # --- struggle ledger ("Feynman ledger") ---
+    # concept -> cumulative struggle score, accumulated from anomaly scores on the word the
+    # ml-service localized. Objectives above are what the CLASS wants taught; this is what the
+    # LEARNER actually keeps tripping over, which is not the same list and is the one worth
+    # chasing. Per class on purpose: a weakness in class 3 should not steer class 5.
+    struggle_scores: dict[str, float] = Field(default_factory=dict)
+    # Current argmax of struggle_scores, passed to the ml-service so the AI student keeps probing
+    # the same weak spot instead of drifting. "" when nothing is outstanding.
+    focus_target: str = ""
 
 
 class PathMemory(BaseModel):
@@ -298,6 +317,15 @@ class AudioClassTeachResponse(BaseModel):
     # Nothing left to teach in this class. Lets the UI say "the class is following" instead of
     # leaving a silent turn ambiguous between "you're doing well" and "it's broken".
     all_goals_covered: bool = False
+
+    # --- one-to-one conversation (set only when answering a specific student's question) ---
+    # Whether the answer actually conveyed the question's answer key. None when nothing was being
+    # answered, or when there was no key to grade against.
+    answer_correct: Optional[bool] = None
+    # True when the student is done with this question — either satisfied, or out of follow-ups.
+    conversation_over: bool = False
+    # How many times the learner has now answered this thread; drives the turn cap in the UI.
+    turns_used: int = 0
 
 
 class EndClassRequest(BaseModel):

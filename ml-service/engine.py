@@ -46,6 +46,105 @@ from schemas import (Anomaly, BEYOND, ChunkAnalysis, COGNITIVE_LOAD, CurriculumU
                      FACTUAL_ERROR, FLUENCY_ISSUE, LOGIC_ERROR, OFF_TOPIC, RECALL_FAILURE,
                      StudentQuestion, WordScore)
 
+# --- what counts as a concept -------------------------------------------------------------------
+# A confusion signal on "the" or "yeah" is noise: function words carry no subject matter, so their
+# acoustics say nothing about whether an idea landed. Localizing onto one is what produced student
+# questions like "Wait, I thought bro was different?" — the machinery worked, it just pointed at a
+# filler word. Anything not listed here is treated as content, so this stays language-agnostic
+# rather than trying to enumerate every content word.
+STOPWORDS = frozenset("""
+a an the this that these those there here it its it's i i'm i've me my we we're our you you're your
+he she they them his her their him is are was were be been being am do does did doing done have has
+had having will would shall should can could may might must of in on at to from by for with about
+into over after before between under above and or but so because if then than as not no nor yes
+yeah yep nope ok okay okey um uh erm hmm hm ah oh eh like just really very quite too also more most
+some any all one two now then when where what which who whom whose why how well right sure thanks
+thank please sorry actually basically literally kind sort lot lots bro dude guys guy man see say
+said says get got go going went come came know knew think thought want wanted need needed let lets
+usually often always never sometimes maybe probably good bad nice cool great fine better best
+different same other another such thing things stuff way ways bit part yet still even much many
+one two three first second next last
+that's there's here's you've we've they've he's she's don't doesn't didn't isn't aren't wasn't
+weren't can't won't wouldn't couldn't shouldn't gonna wanna gotta
+""".split())
+
+# Whisper's training data was subtitled video, so on silence or room noise it emits the credits that
+# ended those clips. These are never speech; treating them as teaching produced analyses (and
+# questions) about words the learner never said. 11% of stored analyses were this.
+HALLUCINATION_MARKERS = (
+    "thanks for watching", "thank you for watching", "субтитры", "субтитр",
+    "ご視聴ありがとうございました", "obrigado", "gracias por ver", "amara.org",
+    "sous-titrage", "abonnez-vous", "字幕", "감사합니다", "thanks for your watching",
+)
+
+
+# Discourse markers that hedge or intensify but carry no subject matter, which STOPWORDS misses.
+# Kept short on purpose: every entry is a word almost never used as the concept being taught, so
+# excluding it as a *target* costs nothing — unlike a real polyseme ("mean", "guess") would.
+_HEDGES = frozenset(
+    "essentially obviously honestly frankly apparently totally kinda sorta".split())
+
+# Bases of pure interjections that, when drawn out, repeat a letter: "umm"->"um", "sooo"->"so",
+# "hmmm"->"hm". Curated rather than reused from STOPWORDS so that collapsing a real doubled letter
+# ("bee"->"be", "inn"->"in", "book"->"bok") can never turn a content word into a false filler —
+# only the collapsed form is matched against this set, never against the big STOPWORDS list.
+_FILLER_BASES = frozenset(
+    "um uh hm er erm ah oh oo oof ooh ugh huh mm m so ha he aw eh ow o a e u".split())
+
+# Any run of the same letter collapses to one before the base/hedge lookup. Real English almost
+# never has triple letters, and the collapsed form is only ever matched against _FILLER_BASES /
+# _HEDGES above, so "book" -> "bok" is safely not-a-filler. This is what stops a paused "umm" from
+# slipping the STOPWORDS net (clean "umm" is not in STOPWORDS; collapsed "um" is in _FILLER_BASES).
+_FILLER_RE = re.compile(r"(.)\1+", re.UNICODE)
+
+
+def is_filler(word: str) -> bool:
+    """Whether a word is a filler or discourse marker with no subject matter. Stricter than a bare
+    STOPWORDS lookup: it also catches drawn-out variants (via the collapse) and the hedges above,
+    so a paused 'umm' or 'essentially' can never become a question target. This is the single
+    chokepoint every target selection reduces to — the firewall has to hold at every site, not
+    only the last one. Mirrored in backend/app/curriculum/teaching.py."""
+    clean = word.strip().strip(".,!?;:\"'()[]{}…-–—").casefold()
+    if not clean:
+        return True
+    collapsed = _FILLER_RE.sub(r"\1", clean)
+    return (clean in STOPWORDS
+            or clean in _HEDGES
+            or collapsed in _FILLER_BASES
+            or collapsed in _HEDGES)
+
+
+def is_content_word(word: str) -> bool:
+    """Whether a token can meaningfully be 'the concept the learner struggled with'. A filler word
+    never can, which is why this delegates to `is_filler` — drawn-out variants ("umm") and hedges
+    ("essentially") must be excluded everywhere, not only at the final target."""
+    clean = word.strip().strip(".,!?;:\"'()[]{}…-–—").casefold()
+    # Two characters or fewer is a particle or an artefact in every language we transcribe.
+    return len(clean) > 2 and not clean.isnumeric() and not is_filler(clean)
+
+
+def _strip_filler(target: str) -> str:
+    """Drop filler tokens from a (possibly multi-word) target span; '' if nothing content remains.
+
+    The judge sometimes returns spans like 'um basically' or 'the Calvin cycle'; the firewall must
+    hold for multi-word targets too, not just single tokens. Returning '' is the signal callers use
+    to decline asking a question rather than ask one about a filler."""
+    if not target:
+        return ""
+    return " ".join(t for t in target.split() if is_content_word(t)).strip()
+
+
+def is_hallucinated(transcript: str) -> bool:
+    """Whether a transcript is Whisper's silence artefact rather than something the learner said."""
+    text = transcript.strip().casefold()
+    if not text:
+        return True
+    if any(marker in text for marker in HALLUCINATION_MARKERS):
+        # Only when the artefact IS the utterance — a long turn that happens to say "thank you"
+        # mid-sentence is real speech.
+        return len(text) < 60
+    return False
+
 
 class ConfusionEngine:
     def __init__(self) -> None:
@@ -180,12 +279,19 @@ class ConfusionEngine:
 
     def analyze(self, audio_path: str, history: list[str], chunk_id: int = 0,
                 enable_space_c: bool | None = None, overall_topic: str = "",
-                curriculum_context: str = "", key_concepts: list[str] | None = None) -> ChunkAnalysis:
+                curriculum_context: str = "", key_concepts: list[str] | None = None,
+                focus_target: str = "") -> ChunkAnalysis:
         use_c = C.ENABLE_SPACE_C if enable_space_c is None else enable_space_c
         key_concepts = key_concepts or []
 
         y, transcript, words, lang = self._transcribe(audio_path)
         if not words:
+            return ChunkAnalysis(chunk_id=chunk_id, text="", confidence=1.0)
+
+        # Whisper invents subtitle credits over silence and room noise ("Thanks for watching",
+        # "Субтитры сделал DimaTorzok"). Analyzing those produced questions about nothing the
+        # learner ever said, so treat them as the silence they actually were.
+        if is_hallucinated(transcript):
             return ChunkAnalysis(chunk_id=chunk_id, text="", confidence=1.0)
 
         sa = self._space_a(y, transcript, words)
@@ -195,9 +301,12 @@ class ConfusionEngine:
         #         confusion: hedge through the whole sentence and nothing is an outlier.
         #   raw — absolute audio/text dissonance. Catches the utterance that is shaky throughout,
         #         which is exactly the case the z-score cannot see.
+        # Function words are excluded: the acoustics of "the" or "yeah" say nothing about whether
+        # a concept is understood, and localizing onto one yields "I thought bro was different?".
         red = [
             i for i in range(n_w)
             if 0 < i < n_w - 1
+            and is_content_word(words[i]["word"])
             and (sa["z"][i] > C.ZSCORE_ANOMALY or sa["raw"][i] > C.ABSOLUTE_DISSONANCE)
         ]
 
@@ -205,7 +314,7 @@ class ConfusionEngine:
         fact = self._space_c(transcript, curriculum_context, key_concepts) if use_c else {"verdict": "SKIP"}
 
         return self._build(chunk_id, transcript, words, sa, red, logic, fact, history,
-                           overall_topic, curriculum_context)
+                           overall_topic, curriculum_context, focus_target)
 
     # ---------- stages ----------
 
@@ -362,19 +471,27 @@ class ConfusionEngine:
     # ---------- assembly ----------
 
     def _locate(self, words, span: str | None) -> int:
-        """Index of the word that best matches the judge's offending span; -1 if none."""
+        """Index of the word that best matches the judge's offending span; -1 if none.
+
+        Content words win. First-match-wins used to point at the article in a span like "the water
+        cycle", so the question came back about "the".
+        """
         if not span:
             return -1
         span_l = span.lower().strip().strip(".,!?;:\"'()[]{}")
         span_toks = {t.strip(".,!?;:\"'()[]{}") for t in span_l.split()}
+        fallback = -1
         for i, w in enumerate(words):
             wl = w["word"].lower().strip(".,!?;:\"'()[]{}")
             if wl and (wl in span_l or wl in span_toks):
-                return i
-        return -1
+                if is_content_word(w["word"]):
+                    return i
+                if fallback < 0:
+                    fallback = i
+        return fallback
 
     def _build(self, chunk_id, transcript, words, sa, red, logic, fact, history,
-               overall_topic, curriculum_context):
+               overall_topic, curriculum_context, focus_target=""):
         z_scores, pace_z, entropy_w = sa["z"], sa["pace_z"], sa["entropy"]
         raw = sa["raw"]
         pace_ok = sa.get("pace_ok", True)
@@ -397,12 +514,21 @@ class ConfusionEngine:
 
         # cognitive load: slow articulation and/or scattered alignment.
         load_idx = [i for i in range(n) if bottleneck[i] or scattered[i]]
+        # Filler firewall on the load-bearing words. A pause on "um" or "basically" is a delivery
+        # artefact, not confusion about a concept, so the word named in the evidence (and the one we
+        # may localize onto below) is always a content word. `load_idx` itself stays unfiltered: the
+        # DETECTION and the diagnostic hierarchy are unchanged — only what we point at.
+        content_load = [i for i in load_idx if is_content_word(words[i]["word"])]
         if load_idx:
-            worst = max(load_idx, key=lambda i: pace_z[i])
+            if content_load:
+                worst = max(content_load, key=lambda i: pace_z[i])
+                evidence = f"slow/scattered delivery on '{words[worst]['word'].strip()}'"
+            else:
+                evidence = "slow/scattered delivery throughout"
             anomalies.append(Anomaly(
                 type=COGNITIVE_LOAD, source="space_a/pace+entropy",
                 score=round(float(min(1.0, max(pace_z[load_idx]) / 3.0)), 2),
-                evidence=f"slow/scattered delivery on '{words[worst]['word'].strip()}'"))
+                evidence=evidence))
 
         # Space B: logic error — the judge's offending span, not the last word.
         b_target = self._locate(words, logic.get("span"))
@@ -434,11 +560,17 @@ class ConfusionEngine:
         # alone; it only exists in the disagreement between them.
         if (fact.get("verdict") in ("ALIGNED", "BEYOND", "CONSISTENT") and load_idx
                 and (len(load_idx) / max(n, 1) > C.FLUENCY_LOAD_RATIO_THRESHOLD)):
-            worst_load = max(load_idx, key=lambda i: pace_z[i] + z_scores[i])
+            # Same firewall: the strained word named here is the one the question generator reaches
+            # for, so it must be a content word or described generally — never a filler.
+            if content_load:
+                worst_load = max(content_load, key=lambda i: pace_z[i] + z_scores[i])
+                evidence = (f"Said '{words[worst_load]['word'].strip()}' correctly, but delivery "
+                            "was highly unconfident/strained.")
+            else:
+                evidence = "Delivered correctly but with highly unconfident/strained delivery."
             anomalies.append(Anomaly(
                 type=FLUENCY_ISSUE, source="space_a+c/cross_modal", score=0.75,
-                evidence=f"Said '{words[worst_load]['word'].strip()}' correctly, but delivery was "
-                         "highly unconfident/strained."))
+                evidence=evidence))
 
         # Primary target, most-diagnostic first: a wrong fact beats drift, beats self-contradiction,
         # beats strained delivery, beats a bare hesitation.
@@ -446,11 +578,18 @@ class ConfusionEngine:
         if fact.get("verdict") == "CONTRADICTION" and c_target >= 0:
             target_idx = c_target
         elif fact.get("verdict") == "OFF_TOPIC":
-            target_idx = load_idx[0] if load_idx else 0
+            # `else 0` used to make the FIRST word the target, which on a spoken sentence is almost
+            # always "So" or "Yeah". Prefer a content word; -1 falls through to the judge's span.
+            content = [i for i in (load_idx or range(n)) if is_content_word(words[i]["word"])]
+            target_idx = content[0] if content else -1
         elif logic.get("verdict") == "CONTRADICTION" and b_target >= 0:
             target_idx = b_target
         elif any(a.type == FLUENCY_ISSUE for a in anomalies) and load_idx:
-            target_idx = max(load_idx, key=lambda i: pace_z[i] + z_scores[i])
+            # Firewall: the worst CONTENT word, never a filler. If the only laboured words were
+            # fillers there is no concept to chase — yield to the bare-hesitation target instead
+            # of localizing onto "um". The hierarchy (this branch sits above `a_target`) is kept.
+            target_idx = (max(content_load, key=lambda i: pace_z[i] + z_scores[i])
+                          if content_load else a_target)
         elif a_target >= 0:
             target_idx = a_target
 
@@ -461,6 +600,12 @@ class ConfusionEngine:
             localized_target = fact["span"]
         elif logic.get("verdict") == "CONTRADICTION" and logic.get("span"):
             localized_target = logic["span"]
+        # The filler firewall on the variable itself: strip filler tokens from whatever target we
+        # landed on — single word, judge span, or logic span — and drop it entirely if nothing
+        # content remains. This replaces the old single-word-only last line of defence, which let
+        # multi-word filler spans ("um basically") and drawn-out variants ("umm") straight through
+        # to become "I thought 'umm' was different?".
+        localized_target = _strip_filler(localized_target) or None
 
         # dissonance -> confidence in [0,1] (HIGH = clear). Absolute severity, not ratios: one
         # badly-stumbled word in a long sentence still means the speaker lost the thread there.
@@ -490,13 +635,18 @@ class ConfusionEngine:
             curriculum_update = CurriculumUpdate(added_concepts=[fact["span"]])
 
         # The AI student's interruption, written here while the word-level evidence is in hand.
+        # Ask when this utterance broke somewhere, OR when the caller is still chasing a concept
+        # from an earlier turn. Without the second case a clean sentence ends the thread, and the
+        # focus target — the whole point of tracking one — would never be consulted.
         student_q = None
-        if anomalies and localized_target:
+        focus = (focus_target or "").strip()
+        if anomalies and (localized_target or focus):
             primary = next((a for a in anomalies if a.type in (
                 FACTUAL_ERROR, OFF_TOPIC, FLUENCY_ISSUE, BEYOND, LOGIC_ERROR, RECALL_FAILURE)),
                 anomalies[0])
             student_q = self._generate_student_question(
-                primary, localized_target, overall_topic, curriculum_context, transcript)
+                primary, localized_target or focus, overall_topic, curriculum_context,
+                transcript, focus)
 
         red_set = set(red)
         detail = [WordScore(
@@ -514,17 +664,37 @@ class ConfusionEngine:
                              student_question=student_q, curriculum_update=curriculum_update)
 
     def _generate_student_question(self, anomaly: Anomaly, target: str, overall_topic: str,
-                                   curriculum: str, transcript: str) -> StudentQuestion | None:
+                                   curriculum: str, transcript: str,
+                                   focus_target: str = "") -> StudentQuestion | None:
         """Turn the strongest anomaly into something a classmate would actually say. The anomaly
         type picks the stance: confused about an error, intrigued by a BEYOND, gently redirecting
         an OFF_TOPIC. Returns None when the judge is unreachable or writes nothing usable, and the
         backend then falls back to its own question generator."""
+        # Layer-2 filler ban — the last checkpoint before a question is written. `target` should
+        # already be clean (the _build firewall strips fillers before they reach localized_target),
+        # but this does not trust its input: if the target is a filler or empty, fall back to the
+        # cross-turn focus, and if THAT is also a filler, decline so the backend's transcript-
+        # grounded generator asks something real instead. The canned phrases below template the
+        # target verbatim — "I thought 'um' was different?" is exactly what this guard prevents.
+        target = _strip_filler(target)
+        focus_clean = _strip_filler(focus_target)
+        if not target:
+            target = focus_clean
+        if not target:
+            return None
         # The curriculum excerpt keeps the question inside what this class actually covers — without
         # it the judge tends to ask something reasonable but off-syllabus.
         reference = f'\nWhat the class covers: "{curriculum[:600]}"' if curriculum else ""
+        # The thread. Without it every question is written from one utterance in isolation, so a
+        # series of them wanders — which is exactly what the learner experiences as "random".
+        focus_line = (
+            f'\nYou have been confused about "{focus_clean}" for a few turns now. Keep your '
+            f"question on that unless the teacher has clearly just resolved it."
+            if focus_clean else ""
+        )
         prompt = f"""You are a student in a classroom. The teacher just spoke.
 Teacher's words: "{transcript}"
-Main Topic: "{overall_topic}"{reference}
+Main Topic: "{overall_topic}"{reference}{focus_line}
 Anomaly detected: {anomaly.type}
 Target/Evidence: {anomaly.evidence}
 
@@ -534,6 +704,8 @@ Rules for your question (max 30 words):
 - If beyond: Act intrigued. "Wow, how does {target} connect to what we were just learning?"
 - If factual_error/recall_failure: Act confused. "Wait, I thought {target} was different? Can you clarify?"
 
+NEVER ask about a filler or hesitation word ("um", "uh", "basically", "like", "you know"). If the
+target ever is one, ask what the teacher MEANT by the idea behind it instead.
 CRITICAL: Output ONLY the question itself. No thinking, no quotes, no explanations. Just the question."""
 
         raw_q = self._judge(prompt, max_tokens=150, temperature=0.6)

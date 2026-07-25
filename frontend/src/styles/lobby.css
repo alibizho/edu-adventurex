@@ -765,6 +765,9 @@
   }
 
   .mic-meter-fill {
+    /* The recorder writes this width imperatively (see useContinuousRecorder's meterRef), so the
+       resting state has to be declared here rather than inherited from a React style prop. */
+    width: 0;
     height: 100%;
     background: var(--ink);
     /* steps() so the meter ticks in blocks like everything else, not a smooth slider. */

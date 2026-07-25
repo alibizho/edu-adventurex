@@ -73,3 +73,6 @@ class AnalyzeRequest(BaseModel):
     overall_topic: str = ""
     curriculum_context: str = ""
     key_concepts: list[str] = Field(default_factory=list)
+    # The concept the caller's struggle ledger says the learner keeps missing. This service holds
+    # no cross-request state, so a multi-turn focus can only come from the backend.
+    focus_target: str = ""

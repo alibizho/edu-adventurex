@@ -19,6 +19,31 @@ from ..schemas import (
 )
 
 
+def count_thread_answers(ledger: list[QAEntry], question_id: int) -> int:
+    """How many answers a conversation thread has taken, following parent_id links.
+
+    Shared by both stores so the two can't disagree about what counts as a turn. Walks up to the
+    root question and then back down every follow-up, because the cap must apply to the whole
+    back-and-forth about one concept — not to each rephrasing of it.
+    """
+    by_id = {e.question.id: e for e in ledger}
+    root, seen = question_id, set()
+    while root in by_id and by_id[root].question.parent_id is not None and root not in seen:
+        seen.add(root)
+        root = by_id[root].question.parent_id
+
+    thread = {root}
+    changed = True
+    while changed:
+        changed = False
+        for entry in ledger:
+            parent = entry.question.parent_id
+            if parent in thread and entry.question.id not in thread:
+                thread.add(entry.question.id)
+                changed = True
+    return sum(1 for e in ledger if e.question.id in thread and e.answer is not None)
+
+
 class Store(Protocol):
     # lifecycle (no-ops for the memory store)
     async def init(self) -> None: ...
@@ -43,6 +68,8 @@ class Store(Protocol):
     async def next_question_id(self, session_id: str) -> int: ...
     async def record_questions(self, session_id: str, questions: list[TargetedQuestion]) -> None: ...
     async def record_answer(self, session_id: str, question_id: int, answer: str) -> bool: ...
+    async def find_question(self, session_id: str, question_id: int) -> QAEntry | None: ...
+    async def thread_turns(self, session_id: str, question_id: int) -> int: ...
     async def covered_chunk_ids(self, session_id: str) -> set[int]: ...
 
     # session topic

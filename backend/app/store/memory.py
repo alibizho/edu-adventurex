@@ -20,6 +20,7 @@ from ..schemas import (
     Segment,
     TargetedQuestion,
 )
+from .base import count_thread_answers
 
 # Process-wide state, keyed by session_id.
 _transcripts: dict[str, list[Segment]] = {}
@@ -47,7 +48,10 @@ class MemoryStore:
     # ---- transcript ----
 
     async def get_transcript(self, session_id: str) -> list[Segment]:
-        return _transcripts.setdefault(session_id, [])
+        # Copy, don't alias. The db store builds a fresh list per call, so a caller that holds the
+        # result across an append_segment sees the new segment here and NOT there — the same code
+        # then behaves differently depending on STORE_BACKEND. A shallow copy makes the two agree.
+        return list(_transcripts.setdefault(session_id, []))
 
     async def append_segment(self, session_id: str, segment: Segment) -> None:
         _transcripts.setdefault(session_id, []).append(segment)
@@ -55,7 +59,7 @@ class MemoryStore:
     # ---- confusion analyses ----
 
     async def get_analyses(self, session_id: str) -> list[ChunkAnalysis]:
-        return _chunk_analyses.setdefault(session_id, [])
+        return list(_chunk_analyses.setdefault(session_id, []))    # copy: see get_transcript
 
     async def append_analysis(self, session_id: str, analysis: ChunkAnalysis) -> None:
         """Upsert by chunk_id: replace an existing entry with the same chunk_id, else append."""
@@ -84,7 +88,9 @@ class MemoryStore:
     # ---- targeted-question ledger ----
 
     async def get_history(self, session_id: str) -> list[QAEntry]:
-        return _qa_ledger.setdefault(session_id, [])
+        # Copy the list, not the entries: record_answer mutates entries through _qa_ledger, so
+        # sharing the QAEntry objects is what keeps an answer visible to an already-fetched history.
+        return list(_qa_ledger.setdefault(session_id, []))
 
     async def next_question_id(self, session_id: str) -> int:
         """Monotonic id for the next targeted question in this session."""
@@ -104,6 +110,15 @@ class MemoryStore:
                 entry.answered_at = time.time()
                 return True
         return False
+
+    async def find_question(self, session_id: str, question_id: int) -> QAEntry | None:
+        for entry in _qa_ledger.setdefault(session_id, []):
+            if entry.question.id == question_id:
+                return entry
+        return None
+
+    async def thread_turns(self, session_id: str, question_id: int) -> int:
+        return count_thread_answers(_qa_ledger.setdefault(session_id, []), question_id)
 
     async def covered_chunk_ids(self, session_id: str) -> set[int]:
         """Chunks that already have an ANSWERED question — excluded from further selection."""

@@ -88,12 +88,14 @@ uvicorn server:app --host 0.0.0.0 --port 8100
 | `overall_topic` | `""` | the topic being taught |
 | `curriculum_context` | `""` | class objective + teacher's notes + source material |
 | `key_concepts` | `[]` | JSON array of concepts already covered |
+| `focus_target` | `""` | the concept the learner keeps stumbling over, picked by the backend's struggle ledger. Keeps the student's question on one thread across utterances — this service holds no state between calls. |
 
 ```bash
 curl -F audio=@utterance.wav -F chunk_id=4 -F 'history=["earlier transcript..."]' \
      -F overall_topic='Computer Networks' \
      -F curriculum_context='How a packet is forwarded hop by hop...' \
      -F 'key_concepts=["routing table","hop"]' \
+     -F focus_target='routing table' \
      http://localhost:8100/analyze
 ```
 ```json

@@ -45,7 +45,6 @@ Keys live server-side in `backend/.env` only.
 | `/concepts` | `ConceptPage` | The generated classes, as a mermaid map. Pick one to teach. |
 | `/study` | `StudyPage` | The teaching session: notes, AI-student sidebar, mic. |
 | `/progress` | `ProgressPage` | Per-class readiness across every stored path. |
-| `/gaps` | `GapsPage` | What the learner struggled with. |
 | `/summary` | `SummaryPage` | Post-class transfer-delta result (polls the analysis job). |
 | `/map` | `KnowledgeMapPage` | All growth paths. |
 | `*` | `NotFoundPage` | |

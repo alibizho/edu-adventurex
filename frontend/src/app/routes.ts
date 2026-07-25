@@ -3,7 +3,6 @@ export const ROUTES = {
   concepts: "/concepts",
   study: "/study",
   progress: "/progress",
-  gaps: "/gaps",
   summary: "/summary",
   map: "/map",
 } as const;

@@ -91,10 +91,32 @@
     left: 36%;
     width: min(48vw, 690px);
     min-height: 170px;
+    /* The bubble was sized for exactly one line. A conversation can now run several turns, so cap
+       it and scroll instead of growing down into the mic control below. */
+    max-height: 42vh;
+    overflow-y: auto;
     padding: 48px 42px 34px;
     border: 5px solid var(--ink);
     box-shadow: 10px 10px 0 var(--ink);
     background: var(--paper);
+  }
+
+  /* Earlier turns, kept visible so the teacher can see what they already tried. Quieter than the
+     student's current line, which stays the focus of the bubble. */
+  .student-speech-thread {
+    margin: 22px 0 0;
+    padding: 18px 0 0;
+    border-top: 3px solid var(--ink);
+    list-style: none;
+    font-size: 13px;
+    line-height: 1.5;
+    opacity: 0.72;
+  }
+
+  .student-speech-thread .thread-turn + .thread-turn { margin-top: 10px; }
+  .student-speech-thread .thread-turn span {
+    font-weight: 700;
+    letter-spacing: 1px;
   }
 
   .student-speech::before {
@@ -260,6 +282,11 @@
   }
 
   .voice-button svg { width: 54px; height: 54px; fill: currentColor; }
+  /* It's a real button now: say so on hover, and make "armed" visible at a glance — an idle mic
+     that looks identical to a live one is why a stalled recorder went unnoticed. */
+  .voice-button { cursor: pointer; color: var(--ink); }
+  .voice-button:hover { box-shadow: 13px 13px 0 var(--ink); }
+  .voice-button.is-armed { border-style: solid; }
   .voice-button.is-listening { background: var(--ink); color: var(--paper); }
   .voice-button:focus-visible,
   .back-to-material:focus-visible { outline: 4px solid var(--ink); outline-offset: 5px; }

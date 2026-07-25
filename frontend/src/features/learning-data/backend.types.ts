@@ -127,6 +127,8 @@ export type TargetedQuestion = {
   text: string;
   anomaly_type: string | null;
   rationale: string | null;
+  /** The question this one follows up on, when the student is still chasing the same concept. */
+  parent_id?: number | null;
 };
 
 export type ClassTeachResponse = {
@@ -142,6 +144,12 @@ export type AudioClassTeachResponse = Omit<ClassTeachResponse, "new_segment"> & 
   degraded: boolean;
   /** Nothing left to teach in this class — lets the UI distinguish "following you" from silence. */
   all_goals_covered: boolean;
+  /** Whether the answer conveyed the question's key. null when nothing was graded. */
+  answer_correct?: boolean | null;
+  /** The student is done with this question — satisfied, or out of follow-ups. */
+  conversation_over?: boolean;
+  /** Answers given in this thread so far. */
+  turns_used?: number;
 };
 
 export type FusionSegment = {

@@ -52,6 +52,11 @@ class AnalysisRow(Base):
     detail: Mapped[list] = mapped_column(JSONB, default=list)      # list[WordScore] as dicts
     student_question: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     curriculum_update: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Browser-measured prosody + the ml-service's own confidence from before fusion. Both are set
+    # by fusion.fuse_prosody; without columns for them the durable store silently dropped them and
+    # the GPU-vs-browser comparison gpu_confidence exists for was impossible to make.
+    prosody: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    gpu_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class RunRow(Base):
@@ -81,6 +86,10 @@ class QAEntryRow(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     answered_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Ground truth the verifier grades against, and the question this one follows up on. Unlike
+    # PathMemory (one JSONB blob) the QA ledger is a real table, so these need real columns.
+    answer_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class GrowthPathRow(Base):

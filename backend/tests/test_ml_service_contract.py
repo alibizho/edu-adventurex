@@ -72,6 +72,7 @@ def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
             overall_topic,
             curriculum_context,
             key_concepts,
+            focus_target,
         ):
             captured.update(
                 audio_path=audio_path,
@@ -81,6 +82,7 @@ def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
                 overall_topic=overall_topic,
                 curriculum_context=curriculum_context,
                 key_concepts=key_concepts,
+                focus_target=focus_target,
                 existed_during_analysis=Path(audio_path).exists(),
             )
             return gpu_schemas.ChunkAnalysis(
@@ -108,6 +110,7 @@ def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
                 "overall_topic": "Quantum Physics",
                 "curriculum_context": "Observer effect notes",
                 "key_concepts": '["measurement", "superposition"]',
+                "focus_target": "  wave function collapse  ",
             },
             files={"audio": ("turn.wav", b"RIFF-test-audio", "audio/wav")},
         )
@@ -122,6 +125,8 @@ def test_gpu_analyze_endpoint_parses_context_and_preserves_new_fields():
     assert captured["key_concepts"] == ["measurement", "superposition"]
     assert captured["overall_topic"] == "Quantum Physics"
     assert captured["curriculum_context"] == "Observer effect notes"
+    # The struggle ledger's current weak spot, stripped like the other free-text fields.
+    assert captured["focus_target"] == "wave function collapse"
     assert captured["existed_during_analysis"] is True
     assert not os.path.exists(str(captured["audio_path"]))
 

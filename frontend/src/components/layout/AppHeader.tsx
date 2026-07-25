@@ -16,7 +16,6 @@ export function AppHeader() {
     { label: "HOME", to: ROUTES.material, end: true },
     { label: "TEACH", to: teachRoute, end: false },
     { label: "PROGRESS", to: ROUTES.progress, end: false },
-    { label: "GAPS", to: ROUTES.gaps, end: false },
     { label: "MAP", to: ROUTES.map, end: false },
   ] as const;
 
