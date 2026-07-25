@@ -1,9 +1,3 @@
-"""System prompts for the learning-plan layer. Adapted from the reference curriculum demo:
-scope the topic, structure it into classes, then write a brief Markdown teacher's-notes primer.
-Structured shapes (TopicScope / class list) are enforced by `.with_structured_output(...)`, so
-these prompts describe the *task*, not the JSON schema."""
-
-# --- Agent 1: scope. Reject "too broad", else confirm + suggest a class count. ---
 SCOPE_SYSTEM = """\
 You are a curriculum designer. Decide whether the learner's request is specific enough to be
 taught in 3-8 focused classes.
@@ -20,7 +14,6 @@ A topic is TOO BROAD if it spans multiple independent domains (e.g. "physics", "
 - If material is provided, base the scoping and any suggestions on its actual content.
 """
 
-# --- Agent 2: structure. Ordered classes; titles + objectives only, NO teaching content. ---
 STRUCTURE_SYSTEM = """\
 You design a teaching curriculum as an ordered list of classes. Each class is ONE topic the
 learner will come to understand by TEACHING it to an AI student.
@@ -42,7 +35,6 @@ Rules:
 - If a source document is provided, follow its structure and content.
 """
 
-# --- Agent 3: teacher's notes. A brief Markdown primer the learner teaches FROM. ---
 COVERAGE_SYSTEM = """\
 You decide which learning objectives a teacher has actually covered, by reading what they said
 out loud while teaching.

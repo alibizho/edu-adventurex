@@ -13,5 +13,6 @@ export function PixelTeacherAvatar() {
       <path d="M30 25h4M27 35h10M20 44h24v5h5v12H15V49h5z" fill="none" stroke="currentColor" strokeWidth="3" />
       <path d="M20 45l12 9 12-9v16H20zM29 49h6v12h-6z" fill="currentColor" />
     </svg>
+
   );
 }

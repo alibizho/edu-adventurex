@@ -350,7 +350,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
       LEGACY_SESSION_STORAGE_KEYS.forEach((key) => sessionStorage.removeItem(key));
     } catch {
-      // The in-memory experience remains usable if browser storage is unavailable.
     }
   }, [state]);
 
@@ -458,6 +457,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   ]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+
 }
 
 export function useSession() {

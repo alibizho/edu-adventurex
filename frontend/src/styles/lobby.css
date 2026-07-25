@@ -33,9 +33,6 @@
     text-align: center;
   }
 
-  /* Without this the text block is a flex item at its default `min-width: auto`, so it refuses to
-     shrink below the widest line it contains and a long module title walks straight out through
-     the card's right border instead of wrapping inside it. */
   .lobby-module-card > div {
     min-width: 0;
     overflow-wrap: break-word;
@@ -62,8 +59,6 @@
     letter-spacing: 1px;
   }
 
-  /* Wraps. `white-space: nowrap` here was what actually broke the card: the topic line set the
-     text block's minimum width, and any topic longer than the card pushed the title out with it. */
   .lobby-module-card p {
     margin: 7px 0 0;
     font-size: clamp(11px, 1vw, 17px);
@@ -139,9 +134,6 @@
     outline-offset: 5px;
   }
 
-  /* The window onto the room. Shorter than the art on purpose: the scene below keeps the picture's
-     own shape and hangs out of the bottom of this box, which crops off the teacher's desk — the
-     one piece of furniture that is behind the camera, not in front of it. */
   .classroom-viewport {
     width: 100%;
     aspect-ratio: 2.5;
@@ -150,11 +142,8 @@
     background: var(--paper);
   }
 
-  /* The scene is the picture, at the picture's aspect ratio, so a percentage anywhere inside it is
-     a percentage of the art. That is the whole trick: seat coordinates read off the artwork can be
-     used verbatim, and re-cropping the viewport above can never slide a student off their desk. */
   .classroom-scene {
-    --window: .74;    /* viewport height ÷ scene height: 1.85 / 2.5 */
+    --window: .74;
     --zoom: 2.2;
     position: relative;
     width: 100%;
@@ -164,9 +153,6 @@
     will-change: transform;
   }
 
-  /* One camera move, solved rather than hand-tuned: scale by --zoom about the scene's centre, then
-     translate the seat at (--seat-x, --seat-y) onto the centre of the *viewport* — which is not
-     the centre of the scene, hence the --window term. */
   .classroom-scene.is-zooming {
     transition: transform 520ms steps(7, end);
     pointer-events: none;
@@ -185,17 +171,7 @@
     image-rendering: pixelated;
   }
 
-  /* One student. Anchored by the bottom edge, which is the desk they sit behind — the poses are
-     drawn as the part of a person that shows above a desk, so they all share that baseline even
-     though they are different heights. */
-  /* Sized against the gap the room actually leaves. The blackboard's bottom edge sits ~5% of the
-     picture above the back row's desks, so a student much taller than that is drawn across the
-     board — and these sprites are black silhouettes, which on a black board is a hole. */
   .classroom-seat {
-    /* One knob for how big the class is: the share of the picture's width taken by a single source
-       pixel of sprite. Every pose derives its width from this and its own file width, so the head
-       — 51 source pixels across in all three files — comes out the same size in all three. Sizing
-       the poses independently is what made them look like people of different ages. */
     --unit: .066%;
     --overhang: 0%;
     position: absolute;
@@ -204,11 +180,6 @@
     transform: translate(-50%, var(--overhang));
   }
 
-  /* How far each pose hangs below the desk it sits at, as a share of its own height.
-     The files stop at different points on the body — handup is cut off level with the desk edge,
-     idle has arms reaching past it, sleeping has one dangling — so anchoring all three by the
-     bottom of the file sat the torsos at three different heights and left the slumped ones
-     hovering. These offsets put every torso back on the same line. */
   .classroom-seat--idle { --overhang: 13.7%; }
 
   .classroom-seat--handup {
@@ -221,10 +192,6 @@
     --overhang: 24.5%;
   }
 
-  /* The paper-coloured outline is what keeps a student readable where they cross the blackboard.
-     The back row sits barely below it and the sprites are black silhouettes, so without this they
-     are a hole in the board rather than a person in front of it. Four offset shadows rather than a
-     blur: a hard 1px edge is the same outline the art draws everywhere else. */
   .classroom-seat > img {
     width: 100%;
     height: auto;
@@ -235,8 +202,6 @@
       drop-shadow(0 1px 0 var(--paper)) drop-shadow(0 -1px 0 var(--paper));
   }
 
-  /* A raised hand, floating over the student who put it up. Positioned against the seat rather
-     than the scene, so it follows them instead of needing coordinates of its own. */
   .student-question {
     position: absolute;
     left: 50%;
@@ -253,19 +218,13 @@
     font-size: clamp(30px, 3.6vw, 58px);
     line-height: 1;
     cursor: pointer;
-    /* The resting state, for when `prefers-reduced-motion` turns the keyframes off. */
     transform: translateX(-50%);
     transform-origin: bottom center;
-    /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
-       "waiting for you". steps() keeps it in the pixel idiom instead of easing smoothly. */
     animation:
       hand-pop 240ms steps(4, end) 1,
       hand-jump 1100ms steps(3, end) 240ms infinite;
   }
 
-  /* Every frame carries the centring translate: the bubble is placed with `left: 50%`, and a
-     keyframe that set only translateY would drop it and shunt the marker half its width to the
-     right for the whole animation. */
   @keyframes hand-pop {
     from { transform: translate(-50%, 14px) scale(.4); opacity: 0; }
     to   { transform: translate(-50%, 0) scale(1); opacity: 1; }
@@ -277,7 +236,6 @@
     80%           { transform: translate(-50%, -10%); }
   }
 
-  /* The tail, pointing down at the student the bubble belongs to. */
   .student-question::after {
     content: "";
     position: absolute;
@@ -614,15 +572,12 @@
       flex-basis: 42px;
     }
 
-    /* Taller window on a phone — the room is only 375px wide, and a 2.5 letterbox of it is a
-       slot. --window has to follow: it is the scene's visible fraction, 1.85 ÷ this ratio. */
     .classroom-viewport {
       aspect-ratio: 2;
     }
 
     .classroom-scene {
       --window: .925;
-      /* 2.2x off a narrow viewport crops the student out of frame. */
       --zoom: 1.7;
     }
 
@@ -689,8 +644,6 @@
     }
   }
 
-  /* --- class goals checklist --- */
-
   .objective-list {
     display: grid;
     gap: 7px;
@@ -735,8 +688,6 @@
     opacity: .8;
   }
 
-  /* --- "am I doing well?" — the answer the room used to keep to itself --- */
-
   .classroom-banner {
     margin: 0 0 12px;
     padding: 8px 14px;
@@ -777,8 +728,6 @@
     transition: width 200ms steps(8, end);
   }
 
-  /* The class answering a question the teacher couldn't. Loud on purpose — it is the only time
-     the room stops probing and hands over the thing they were stuck on. */
   .classroom-explanation {
     display: flex;
     align-items: flex-start;
@@ -820,11 +769,6 @@
     font-size: 13px;
   }
 
-  /* --- live teaching controls (mic, level meter, last-heard line) --- */
-
-  /* A column, so the mic sits on the room's centre line with its instruction directly underneath.
-     Side by side, the mic was pushed off-centre by however wide the caption happened to be, and
-     the caption read as a label for something to its left rather than for the button itself. */
   .classroom-controls {
     display: flex;
     flex-direction: column;
@@ -848,12 +792,9 @@
   }
 
   .mic-meter-fill {
-    /* The recorder writes this width imperatively (see usePressToTalkRecorder's meterRef), so the
-       resting state has to be declared here rather than inherited from a React style prop. */
     width: 0;
     height: 100%;
     background: var(--ink);
-    /* steps() so the meter ticks in blocks like everything else, not a smooth slider. */
     transition: width 90ms steps(6, end);
   }
 
@@ -871,7 +812,6 @@
     display: block;
   }
 
-  /* The two ways out of a class, side by side: start it over, or finish it. */
   .classroom-actions {
     display: flex;
     flex-wrap: wrap;
@@ -881,8 +821,6 @@
     margin-top: 16px;
   }
 
-  /* Inside the row the finish button is one item among several; its own auto margins would shove
-     the rest of the row off-centre. */
   .classroom-actions .classroom-finish {
     margin: 0;
   }
@@ -893,7 +831,6 @@
     font-size: clamp(12px, 1.2vw, 15px);
   }
 
-  /* Armed. The next press throws the lesson away, so it stops looking like the quiet option. */
   .classroom-reset.is-confirming {
     background: var(--ink);
     color: var(--paper);
@@ -904,8 +841,6 @@
     cursor: not-allowed;
   }
 
-  /* Covered every objective — the button says so and earns some weight, but is never the only
-     way out of the class. */
   .classroom-finish.is-mastered {
     box-shadow: 7px 7px 0 var(--ink);
     transform: scale(1.04);
@@ -925,7 +860,6 @@
       transform: none;
     }
 
-    /* The marker still has to appear — it just doesn't bounce. */
     .student-question {
       animation: none;
     }

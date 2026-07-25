@@ -1,6 +1,4 @@
 @layer pages {
-  /* The build readout. Shown in place of the material form while /plan/build/stream runs — a
-     minute of model calls, reported as it happens rather than hidden behind a spinner. */
   .generating {
     display: grid;
     gap: 44px;
@@ -11,7 +9,6 @@
   }
 
   .generating-title {
-    /* A shade smaller than a page title: the console below is the thing being read. */
     font-size: clamp(38px, 4.4vw, 68px);
   }
 
@@ -30,8 +27,6 @@
     letter-spacing: 2px;
   }
 
-  /* The two blocks in the corner of the reference — a window chrome that does nothing, on
-     purpose: nothing here is clickable while a build is running. */
   .generating-console-dots::before,
   .generating-console-dots::after {
     content: "";
@@ -43,8 +38,6 @@
   }
 
   .generating-log {
-    /* Tall enough to hold the whole run of a 5-class course without scrolling; taller courses
-       scroll inside the panel rather than pushing the page around. */
     height: 300px;
     overflow-y: auto;
     margin-top: 18px;
@@ -78,7 +71,6 @@
     .generating { gap: 28px; }
     .generating-console { padding: 16px 14px 18px; }
     .generating-log { height: 260px; font-size: 11px; }
-    /* The log is fixed-width monospace; let it scroll sideways rather than squeeze the page. */
     .generating-log { overflow-x: auto; }
   }
 }

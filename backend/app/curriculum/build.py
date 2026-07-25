@@ -1,15 +1,3 @@
-"""Curriculum builder — the build steps, all LangChain over the DeepSeek endpoint:
-
-  scope_topic            -> TopicScope      (confirm / narrow the topic)
-  build_plan             -> GrowthPath      (structure into ~5 ordered classes, notes and all)
-  generate_all_class_notes -> None          (every class's notes at once, whole outline in view)
-  generate_class_notes   -> Markdown str    (one class's notes, memory-aware; the lazy backfill)
-
-Structured shapes are produced with `.with_structured_output(..., method="json_mode")`. Draft
-models keep the LLM from filling `teacher_notes` / `notes_generated` in the structuring call —
-titles and objectives first, then the notes step writes every class's material against that
-outline, which is what stops two classes teaching the same thing.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -37,34 +25,24 @@ from .prompts import NOTES_SYSTEM, SCOPE_SYSTEM, STRUCTURE_SYSTEM
 
 log = logging.getLogger("curriculum.build")
 
-
 class _ClassDraft(BaseModel):
     class_id: str
     title: str
     objective: str
-    # The checkable breakdown of `objective`. Asked for in the same structuring call rather than a
-    # follow-up, so goals cost nothing extra to produce.
     objectives: list[str] = Field(default_factory=list)
     difficulty: str = "beginner"
     prerequisites: list[str] = Field(default_factory=list)
-
 
 class _CurriculumDraft(BaseModel):
     classes: list[_ClassDraft]
     recommended_order: list[str] = Field(default_factory=list)
 
-
 class CurriculumGenerationError(RuntimeError):
-    """The model responded, but did not produce the requested curriculum shape."""
+    pass
 
-
-# What the learner is told when the course can't be structured. One copy: the plain route returns
-# it as a 502 body, the stream has to deliver it in-band (a response that has already started
-# cannot go back and become a 502), and the two must say the same thing.
 STRUCTURE_FAILED = (
     "THE LANGUAGE MODEL COULD NOT PRODUCE A VALID COURSE STRUCTURE. PLEASE TRY AGAIN."
 )
-
 
 def _json_system(prompt: str, schema: type[BaseModel]) -> str:
     compact_schema = json.dumps(schema.model_json_schema(), separators=(",", ":"))
@@ -73,14 +51,11 @@ def _json_system(prompt: str, schema: type[BaseModel]) -> str:
         f"{compact_schema}"
     )
 
-
 def _material_section(material: str | None, limit: int = 6000) -> str:
     material = (material or "").strip()
     return f"\n\nMATERIAL PROVIDED (excerpt):\n{material[:limit]}" if material else ""
 
-
 async def scope_topic(req: ScopeRequest) -> TopicScope:
-    """Confirm the topic or, if too broad, return 3 narrower options."""
     llm = generator_llm(temperature=0.2).with_structured_output(
         TopicScope, method="json_mode"
     )
@@ -103,11 +78,9 @@ async def scope_topic(req: ScopeRequest) -> TopicScope:
         raise CurriculumGenerationError("topic scoping returned no structured output")
     return result
 
-
 async def structure_curriculum(
     confirmed_topic: str, num_classes: int, material: str | None = None
 ) -> tuple[list[ClassUnit], list[str]]:
-    """Return (classes, recommended_order) — titles/objectives/ordering only, no notes."""
     llm = generator_llm(temperature=0.3).with_structured_output(
         _CurriculumDraft, method="json_mode"
     )
@@ -148,20 +121,7 @@ async def structure_curriculum(
     order = draft.recommended_order or [c.class_id for c in classes]
     return classes, order
 
-
 async def build_plan(req: BuildPlanRequest) -> GrowthPath:
-    """Assemble the GrowthPath and write every class's teacher's notes.
-
-    Both steps here, not one now and the rest later: the material for a class is written against
-    the finished outline, so each class knows what its siblings teach and stays off their ground.
-    Generated one class at a time (in parallel) rather than in one call — a course's worth of
-    Markdown in a single response runs into the output cap and truncates the last classes.
-
-    The notes step never raises. A course that could not be STRUCTURED is a 502 (there is nothing
-    to show); a course whose notes tier was rate-limited still gives the learner their classes,
-    with the /notes route backfilling whatever is missing.
-    """
-    # `is not None` so an explicit 0 isn't silently coerced to the default; clamp to a sane minimum.
     n = req.num_classes if req.num_classes is not None else settings.default_classes
     n = max(1, n)
     material = (req.material_text or "").strip()
@@ -173,8 +133,6 @@ async def build_plan(req: BuildPlanRequest) -> GrowthPath:
         total_classes=len(classes),
         recommended_order=order,
         classes=classes,
-        # Only a prefix is persisted, so the notes calls below — the one moment the whole upload
-        # is in hand — are given `material` itself rather than this.
         source_material_summary=(material[:500] + "…") if material else None,
     )
     failed = await generate_all_class_notes(path, material)
@@ -185,19 +143,7 @@ async def build_plan(req: BuildPlanRequest) -> GrowthPath:
         )
     return path
 
-
 async def build_plan_events(req: BuildPlanRequest) -> AsyncIterator[dict[str, Any]]:
-    """`build_plan`, reported as it happens.
-
-    Same two steps and the same functions — this exists because the build is now N+1 model calls
-    and takes most of a minute, and a spinner over that is indistinguishable from a hang. Each
-    event is something that actually finished, so the screen is a readout, not a progress bar
-    pretending to know how long is left.
-
-    The final event carries the built `GrowthPath` under "path"; the caller stores it. Yields
-    `{"stage": "error"}` rather than raising, since a stream that has already begun cannot go back
-    and become an HTTP 502.
-    """
     n = max(1, req.num_classes if req.num_classes is not None else settings.default_classes)
     material = (req.material_text or "").strip()
     yield {"stage": "topic", "topic": req.confirmed_topic, "classes": n}
@@ -222,8 +168,6 @@ async def build_plan_events(req: BuildPlanRequest) -> AsyncIterator[dict[str, An
     for index, cls in enumerate(path.classes, start=1):
         yield {"stage": "class", "index": index, "total": len(path.classes), "title": cls.title}
 
-    # The long half. Classes land out of order (whichever call returns first), so each one is
-    # numbered by arrival — the count is the honest signal, not the sequence.
     yield {"stage": "writing", "total": len(path.classes)}
     done: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
     writer = asyncio.create_task(
@@ -236,8 +180,6 @@ async def build_plan_events(req: BuildPlanRequest) -> AsyncIterator[dict[str, An
         try:
             title, ok = await asyncio.wait_for(done.get(), timeout=0.5)
         except TimeoutError:
-            # Nothing landed in that window. Only give up once the writer itself is finished —
-            # it is what decides when there is nothing more coming.
             if writer.done():
                 break
             continue
@@ -249,33 +191,18 @@ async def build_plan_events(req: BuildPlanRequest) -> AsyncIterator[dict[str, An
     await writer
     yield {"stage": "done", "path": path}
 
-
 def _ordered_split(
     path: GrowthPath, cls: ClassUnit
 ) -> tuple[list[ClassUnit], list[ClassUnit]]:
-    """(earlier, later) around `cls` in the recommended teaching order.
-
-    Both halves matter to the notes prompt: earlier classes are what must not be re-taught, later
-    ones are what must not be pre-empted. A class missing from `recommended_order` is appended
-    rather than dropped — the model writes that list, and a class the outline forgot would
-    otherwise be invisible to every one of its siblings.
-    """
     order = list(path.recommended_order) or [c.class_id for c in path.classes]
     order += [c.class_id for c in path.classes if c.class_id not in order]
     by_id = {c.class_id: c for c in path.classes}
-    # Absent from the order = treated as last, so everything else counts as earlier.
     idx = order.index(cls.class_id) if cls.class_id in order else len(order)
     earlier = [by_id[cid] for cid in order[:idx] if cid in by_id]
     later = [by_id[cid] for cid in order[idx + 1:] if cid in by_id]
     return earlier, later
 
-
 def _outline_block(label: str, classes: list[ClassUnit]) -> str:
-    """One side of the outline: each class as its title plus the objectives it owns.
-
-    Titles alone were the old context, and they are too coarse — "Forces was covered" leaves the
-    model to guess what that meant, which is how two classes end up teaching the same idea.
-    """
     if not classes:
         return f"{label}: (none)"
     body = "\n".join(
@@ -284,7 +211,6 @@ def _outline_block(label: str, classes: list[ClassUnit]) -> str:
     )
     return f"{label}:\n{body}"
 
-
 def _notes_user_message(
     path: GrowthPath,
     cls: ClassUnit,
@@ -292,12 +218,8 @@ def _notes_user_message(
     covered_concepts: Sequence[str] = (),
     material: str | None = None,
 ) -> str:
-    """The notes prompt, shared by the eager build and the lazy /notes route so the two can't
-    drift. Everything the class must not repeat and must not pre-empt is stated explicitly."""
     earlier, later = _ordered_split(path, cls)
     objectives = "\n".join(f"    - {o.text}" for o in cls.checklist())
-    # Only what the learner actually taught in earlier sessions. Empty at build time by
-    # definition, so the line is dropped rather than rendered as a dead "(nothing yet)".
     covered = ", ".join(dict.fromkeys(c for c in covered_concepts if c.strip()))
     covered_line = f"\n\nALSO ALREADY COVERED IN PREVIOUS SESSIONS: {covered}" if covered else ""
     return (
@@ -311,14 +233,12 @@ def _notes_user_message(
         f"{_material_section(material, limit=4000)}"
     )
 
-
 async def _write_notes(user: str) -> str:
     resp = await generator_llm(temperature=0.35).ainvoke(
         [{"role": "system", "content": NOTES_SYSTEM}, {"role": "user", "content": user}]
     )
     content = resp.content if isinstance(resp.content, str) else str(resp.content)
     return content.strip()
-
 
 async def generate_all_class_notes(
     path: GrowthPath,
@@ -327,32 +247,14 @@ async def generate_all_class_notes(
     concurrency: int | None = None,
     on_done: Callable[[ClassUnit, bool], None] | None = None,
 ) -> list[str]:
-    """Write every class's notes at once, each call seeing the whole outline.
-
-    This is what stops classes repeating each other: one call per class, but every one of them is
-    told what its siblings own, so the boundaries are decided by the outline rather than guessed
-    from a list of titles. Mutates `path.classes` in place.
-
-    Returns the class_ids whose notes could not be written. They keep `notes_generated=False`, and
-    the lazy /notes route fills them on demand — a rate-limited notes tier must not cost the
-    learner the course they just agreed to.
-
-    `on_done(cls, ok)` fires as each class lands, in completion order rather than course order, so
-    a caller streaming progress can report a class the moment it is written instead of after the
-    slowest one. It runs inside the gather, so it must not block.
-    """
     sem = asyncio.Semaphore(max(1, concurrency or settings.notes_concurrency))
 
     async def one(cls: ClassUnit) -> str:
         async with sem:
-            # Inside the semaphore: the budget covers the call, not the time spent queued behind
-            # an earlier wave.
             notes = await asyncio.wait_for(
                 _write_notes(_notes_user_message(path, cls, material=material)),
                 timeout=settings.notes_timeout,
             )
-        # Applied here rather than after the gather so `on_done` can report a finished class while
-        # its siblings are still being written.
         if notes.strip():
             cls.teacher_notes = notes
             cls.notes_generated = True
@@ -366,28 +268,16 @@ async def generate_all_class_notes(
 
     failed: list[str] = []
     for cls, result in zip(path.classes, results):
-        # A cancelled request (the client hung up) is not N model failures.
         if isinstance(result, asyncio.CancelledError):
             raise result
-        # A blank primer counts as failure: persisted with notes_generated=True it would be a
-        # permanently empty class, reachable again only via ?regenerate=true.
         if isinstance(result, BaseException) or not str(result).strip():
             failed.append(cls.class_id)
             log.warning("notes generation failed for %s: %r", cls.class_id, result)
             if on_done is not None and isinstance(result, BaseException):
-                # The success path already reported; a raised call never got the chance.
                 on_done(cls, False)
     return failed
 
-
 async def generate_class_notes(path: GrowthPath, cls: ClassUnit, memory: PathMemory) -> str:
-    """One class's primer on demand. Since `build_plan` writes them all up-front this is the
-    backfill: paths built before notes were eager, a deliberate `?regenerate=true` once cross-class
-    memory has moved on, and the class whose eager call failed.
-
-    Memory-aware, which the eager path structurally cannot be — at build time nothing has been
-    taught yet.
-    """
     return await _write_notes(
         _notes_user_message(
             path,

@@ -32,8 +32,6 @@
     border: var(--line) solid var(--ink);
     background: var(--paper);
   }
-  /* Only where the nav itself is hidden (max-width: 780px, below). Above that the links are
-     already on screen, so the burger opened a menu duplicating what was next to it. */
   .header-menu-button { display: none; padding: 0; cursor: pointer; }
   .header-menu-button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
@@ -83,9 +81,6 @@
     color: var(--paper);
   }
 
-  /* "Throw this take away" — offered next to the mic in both rooms while a recording is open, so
-     a fumbled sentence costs one press instead of going into the transcript for good. Small on
-     purpose: sending what you just said is the main action, not this. */
   .discard-take {
     min-height: 40px;
     padding: 6px 16px;
@@ -177,7 +172,6 @@
     .app-header { gap: 24px; padding-inline: 16px; border-bottom-width: 5px; }
     .brand { font-size: 36px; }
     .primary-nav { display: none; }
-    /* The nav is gone here, so the burger is the only way to it. */
     .header-menu-button { display: grid; }
     .header-tools { gap: 10px; }
     .primary-nav.is-open {

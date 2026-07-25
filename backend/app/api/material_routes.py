@@ -6,7 +6,6 @@ from ..schemas import MaterialExtractionResponse
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
-
 @router.post("/extract", response_model=MaterialExtractionResponse)
 async def material_extract(files: list[UploadFile] = File(...)) -> MaterialExtractionResponse:
     payload: list[tuple[str, str, bytes]] = []

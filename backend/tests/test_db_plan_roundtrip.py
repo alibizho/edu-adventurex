@@ -1,13 +1,3 @@
-"""Direct DbStore round-trip for the learning-plan tables (growth_paths, path_memory) against a
-live Postgres — the durable counterpart to the in-memory checks in test_curriculum.py. Mirrors
-test_db_roundtrip.py; needs DATABASE_URL + a reachable Postgres.
-
-    DATABASE_URL=postgresql+asyncpg://ts:ts@localhost:5432/teachable PYTHONPATH=. \
-        python tests/test_db_plan_roundtrip.py
-
-It creates a throwaway path, verifies save/get + save_class + memory upsert + durability across a
-fresh engine (a "restart"), then deletes its rows so the DB is left as it was found.
-"""
 import asyncio
 import os
 import sys
@@ -18,12 +8,10 @@ from sqlalchemy import text
 from app.schemas import ClassUnit, GrowthPath
 from app.store.db import DbStore
 
-
 def check(cond: bool, msg: str) -> None:
     print(f"  {'PASS' if cond else 'FAIL'}  {msg}")
     if not cond:
         raise AssertionError(msg)
-
 
 async def main() -> None:
     url = os.environ.get("DATABASE_URL")
@@ -38,7 +26,6 @@ async def main() -> None:
         await st.init()
         check(True, "init() created/verified plan tables")
 
-        # -- save + get the whole GrowthPath (JSONB blob) --
         path = GrowthPath(
             path_id=pid,
             original_input="I want to learn physics",
@@ -57,13 +44,11 @@ async def main() -> None:
         check(got.classes[1].prerequisites == ["c1"], "nested class fields round-trip")
         check(await st.get_path("gp-does-not-exist") is None, "unknown path returns None")
 
-        # -- save_class updates ONE class's notes, in place --
         c1 = got.classes[0]
         c1.teacher_notes = "# Forces\nA push or a pull."
         c1.notes_generated = True
         await st.save_class(pid, c1)
 
-        # -- durability across a RESTART: a brand-new engine reads the persisted blob --
         st2 = DbStore(url)
         try:
             re = await st2.get_path(pid)
@@ -75,7 +60,6 @@ async def main() -> None:
         finally:
             await st2.dispose()
 
-        # -- cross-class memory: default, update, then upsert --
         mem = await st.get_memory(pid)
         check(mem.path_id == pid and mem.covered_concepts == [], "default memory for a new path")
 
@@ -102,7 +86,6 @@ async def main() -> None:
             await conn.execute(text("DELETE FROM path_memory WHERE path_id = :p"), {"p": pid})
         await st.dispose()
         print(f"cleaned up path {pid}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

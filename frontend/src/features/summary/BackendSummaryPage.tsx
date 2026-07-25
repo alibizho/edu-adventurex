@@ -12,15 +12,6 @@ import type { StudyToolId } from "../study/study.types";
 
 const TOOLS = [{ id: "map", label: "Map" }, { id: "tutorial", label: "Tutorial" }, { id: "reset", label: "Reset" }] as const;
 
-/**
- * What each number on the statistics panel actually counts, in one line.
- *
- * `gaps` is the one to be careful with. It is not the classroom student's opinion — it counts
- * TRANSCRIPT SEGMENTS from the background transfer run, where readers given your transcript scored
- * no better than a control group that never heard it (fusion.py: blind_spot + aware_gap, both
- * `delta <= 0`). So it is a comparison against a baseline, not a count of wrong answers, and it is
- * per utterance rather than per concept — several may belong to one idea.
- */
 const STAT_HINTS = {
   turns: "EVERY STRETCH OF YOUR TEACHING THE CLASS HEARD AND ANALYZED.",
   questions: "TIMES A STUDENT STOPPED YOU BECAUSE SOMETHING SOUNDED UNCLEAR.",
@@ -30,10 +21,12 @@ const STAT_HINTS = {
 function Stat({ label, hint, value }: { label: string; hint: string; value: number | string }) {
   return (
     <div>
-      {/* The hint lives inside the <dt> rather than a sibling: dl > div may only hold dt/dd. */}
+      {}
       <dt>{label}<span>{hint}</span></dt>
       <dd>{value}</dd>
+
     </div>
+
   );
 }
 
@@ -97,17 +90,12 @@ export function BackendSummaryPage({ pathId, classId }: { pathId: string; classI
   const progress = memory?.class_progress[classId];
   const fusion = analysis?.fusion ?? snapshot?.fusion;
   const run = analysis?.run ?? snapshot?.run;
-  // Gaps come out of the transfer analysis, which runs after the class ends. Until it lands there
-  // is no count — showing 0 would assert "no gaps found" when nothing has been looked for yet.
   const gapCount = fusion
     ? Object.entries(fusion.quadrant_counts ?? {}).reduce((total, [key, value]) => key === "blind_spot" || key === "aware_gap" ? total + value : total, 0)
     : null;
   const duration = progress?.started_at && progress.completed_at ? Math.max(0, Math.round(progress.completed_at - progress.started_at)) : 0;
   const pending = analysis?.status === "pending" || analysis?.status === "running";
   const rank = !run ? "ANALYSIS PENDING" : run.delta_overall >= 0.4 ? "ELITE TEACHER" : run.delta_overall >= 0.15 ? "SKILLED TEACHER" : "DEVELOPING TEACHER";
-  // "You explained every goal" is only true if you actually did the explaining. The backend marks
-  // a class guided-explanation when a student had to hand over an answer even once, and dropping
-  // that here turned being told into a clean pass.
   const guided = progress?.completion_mode === "guided-explanation";
   const masterStatus = !unit ? "" : [
     progress?.passed_on_mastery
@@ -141,19 +129,18 @@ export function BackendSummaryPage({ pathId, classId }: { pathId: string; classI
         <StudentSidebar student={{ name: "AI STUDENT", readiness: progress?.readiness ?? 0 }} tools={TOOLS} message={message} onToolAction={handleTool} avatarVariant="student" />
         <section className="summary-canvas">
           {isLoading ? <div className="summary-empty retro-panel" role="status">LOADING BACKEND SUMMARY...</div> : error && !path ? (
+
             <div className="summary-empty retro-panel" role="alert"><h1>SUMMARY UNAVAILABLE</h1><p>{error}</p><button className="solid-action" onClick={() => void load()}>RETRY</button></div>
           ) : !path || !unit || progress?.status !== "complete" ? (
             <div className="summary-empty retro-panel"><h1>NO COMPLETED SESSION</h1><p>COMPLETE THIS CLASS BEFORE OPENING ITS SUMMARY.</p><button className="solid-action" onClick={() => navigate(`${ROUTES.study}?path=${encodeURIComponent(pathId)}&class=${encodeURIComponent(classId)}`)}>BACK TO CLASS</button></div>
           ) : (
             <div className="summary-dashboard">
               <h1>{path.confirmed_topic.toUpperCase()}</h1>
+
               <div className="summary-top-grid">
-                {/* Every class is reachable from here — the summary is where you decide what to
-                    teach next, and making that a trip back through the concept map was friction
-                    for no reason. State per class comes from the stored progress rather than
-                    "is it the one being summarised": a class part-way through used to read the
-                    same as one never opened. */}
+                {}
                 <section className="summary-panel growth-panel"><h2><i />GROWTH TIMELINE</h2><div className="growth-track">{path.classes.map((item) => {
+
                   const state = memory?.class_progress[item.class_id]?.status;
                   const stop = state === "complete" ? "completed" : state === "in_progress" ? "active" : "open";
                   const isCurrent = item.class_id === classId;
@@ -162,42 +149,61 @@ export function BackendSummaryPage({ pathId, classId }: { pathId: string; classI
                       type="button"
                       key={item.class_id}
                       className={`growth-stop growth-stop--${stop}${isCurrent ? " is-current" : ""}`}
-                      // The visible label is a tick and a title; spell out what pressing it does.
                       aria-label={`TEACH ${item.title.toUpperCase()}`}
                       aria-current={isCurrent ? "step" : undefined}
                       onClick={() => openClass(item.class_id)}
                     >
                       {stop !== "open" && <span>{stop === "completed" ? "COMPLETED" : "IN PROGRESS"}</span>}
+
                       <b>{stop === "completed" ? "✓" : stop === "active" ? "■" : "○"}</b>
+
                       <strong>{item.title}</strong>
+
                     </button>
+
                   );
                 })}</div><p className="growth-hint">PICK ANY CLASS TO TEACH IT.</p></section>
+
                 <section className="master-panel"><h2>★ MASTER STATUS</h2><p>{pending ? "TRANSFER ANALYSIS IS RUNNING IN THE BACKGROUND." : masterStatus}</p><strong>RANK: {rank}</strong>{(analysis?.status === "failed" || (!analysis && !run)) && <button className="outline-action summary-retry" onClick={retryAnalysis}>RETRY ANALYSIS</button>}</section>
+
               </div>
+
               <div className="summary-bottom-grid">
-                {/* What they were asked to explain, and what they actually did explain — with the
-                    sentence that earned each tick, so the score is auditable rather than asserted. */}
+                {}
                 <section className="summary-panel mastery-panel"><h2>CLASS GOALS</h2><ObjectiveChecklist objectives={classChecklist(unit)} covered={progress.covered_objectives} evidence={progress.objective_evidence} /></section>
+
                 <section className="summary-panel statistics-panel">
                   <h2>TEACHING STATISTICS</h2>
+
                   <dl>
                     <Stat label="TEACHING TURNS" hint={STAT_HINTS.turns} value={progress.turn_count} />
+
                     <Stat label="QUESTIONS RECORDED" hint={STAT_HINTS.questions} value={snapshot?.questions.length ?? 0} />
+
                     <Stat
                       label="GAPS DISCOVERED"
                       hint={gapCount === null ? "FOUND BY THE TRANSFER ANALYSIS, WHICH IS STILL RUNNING." : STAT_HINTS.gaps}
                       value={gapCount ?? "—"}
                     />
+
                   </dl>
+
                 </section>
+
               </div>
+
               {error && <p className="summary-api-error" role="alert">{error}</p>}
+
             </div>
+
           )}
         </section>
+
       </main>
+
       <StatusBar label={pending ? "ANALYZING_SESSION" : run ? "SESSION_ANALYZED" : "SESSION_COMPLETE"} full meta={`${formatDuration(duration)} SESSION TIME`} />
+
     </div>
+
   );
 }

@@ -1,21 +1,13 @@
-"""Offline tests for the learning-plan layer: store round-trip for the GrowthPath / PathMemory
-blobs, and the teaching wrappers (confusion gate + cross-class memory) with the LLM calls stubbed.
-Fully hermetic — no LLM, no ml-service, no Postgres. Run:
-
-    .venv/bin/python -m pytest tests/test_curriculum.py -q
-
-Config is forced hermetic BEFORE the app is imported (memory store), like test_backend.py.
-"""
 import asyncio
 import os
 
 import pytest
 
 os.environ["STORE_BACKEND"] = "memory"
-os.environ["ML_SERVICE_URL"] = "http://127.0.0.1:9"  # unreachable -> neutral degrade
+os.environ["ML_SERVICE_URL"] = "http://127.0.0.1:9"
 
-from app.curriculum import teaching  # noqa: E402
-from app.schemas import (  # noqa: E402
+from app.curriculum import teaching
+from app.schemas import (
     ChunkAnalysis,
     ClassObjective,
     ClassUnit,
@@ -25,12 +17,10 @@ from app.schemas import (  # noqa: E402
     TargetedQuestion,
     TeachTurnResponse,
 )
-from app.store import store  # noqa: E402
-
+from app.store import store
 
 def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
-
 
 def _path(path_id: str, *classes: ClassUnit, topic: str = "Mechanics") -> GrowthPath:
     return GrowthPath(
@@ -41,11 +31,6 @@ def _path(path_id: str, *classes: ClassUnit, topic: str = "Mechanics") -> Growth
         recommended_order=[c.class_id for c in classes],
         classes=list(classes),
     )
-
-
-# --------------------------------------------------------------------------- #
-# store round-trip (GrowthPath + PathMemory as JSONB-style blobs)
-# --------------------------------------------------------------------------- #
 
 def test_store_path_roundtrip_and_save_class():
     path = _path(
@@ -61,7 +46,6 @@ def test_store_path_roundtrip_and_save_class():
     assert [c.class_id for c in got.classes] == ["c1", "c2"]
     assert got.classes[0].notes_generated is False
 
-    # save_class persists generated notes onto just that class
     c1 = got.classes[0]
     c1.teacher_notes = "# Forces\nA force is a push or pull."
     c1.notes_generated = True
@@ -70,8 +54,7 @@ def test_store_path_roundtrip_and_save_class():
     again = run(store.get_path("gp-rt"))
     assert again.classes[0].teacher_notes.startswith("# Forces")
     assert again.classes[0].notes_generated is True
-    assert again.classes[1].notes_generated is False  # untouched
-
+    assert again.classes[1].notes_generated is False
 
 def test_store_memory_roundtrip():
     fresh = run(store.get_memory("gp-mem"))
@@ -85,14 +68,7 @@ def test_store_memory_roundtrip():
     assert again.covered_concepts == ["Forces"]
     assert again.asked_questions == ["Why does F=ma hold?"]
 
-
-# --------------------------------------------------------------------------- #
-# teaching: confusion gate + cross-class memory wiring (LLM calls stubbed)
-# --------------------------------------------------------------------------- #
-
 def _stub_llm(monkeypatch):
-    """Stub student_turn + generate_targeted_questions; return the list that captures the history
-    passed to the question generator so we can assert cross-class dedup wiring."""
     seen_histories: list[list[str]] = []
 
     async def fake_student_turn(transcript, utterance):
@@ -116,7 +92,6 @@ def _stub_llm(monkeypatch):
     monkeypatch.setattr(teaching, "generate_targeted_questions", fake_generate)
     return seen_histories
 
-
 def test_confident_utterance_asks_nothing(monkeypatch):
     _stub_llm(monkeypatch)
     c1 = ClassUnit(class_id="c1", title="Forces", objective="Understand forces.")
@@ -126,9 +101,7 @@ def test_confident_utterance_asks_nothing(monkeypatch):
         "gp-clear", "c1", c1, "A force is a push or a pull that changes an object's motion."
     ))
     assert r.asked is False and r.question is None
-    # nothing recorded in memory
     assert run(store.get_memory("gp-clear")).asked_questions == []
-
 
 def test_hedged_utterance_asks_and_memory_spans_classes(monkeypatch):
     seen = _stub_llm(monkeypatch)
@@ -136,7 +109,6 @@ def test_hedged_utterance_asks_and_memory_spans_classes(monkeypatch):
     c2 = ClassUnit(class_id="c2", title="Energy", objective="Understand energy.")
     run(store.save_path(_path("gp-hedge", c1, c2)))
 
-    # hedged utterance in c1 -> a question fires and is remembered
     r1 = run(teaching.class_teach_turn(
         "gp-hedge", "c1", c1, "um, i think a force is maybe like, kind of a push?"
     ))
@@ -144,21 +116,13 @@ def test_hedged_utterance_asks_and_memory_spans_classes(monkeypatch):
     q1 = r1.question.text
     assert q1 in run(store.get_memory("gp-hedge")).asked_questions
 
-    # hedged utterance in c2 -> the question generator was handed c1's question as history
     r2 = run(teaching.class_teach_turn(
         "gp-hedge", "c2", c2, "uh, energy is sort of, i dunno, the ability to do stuff?"
     ))
     assert r2.asked is True
     assert q1 in seen[-1], "cross-class asked question should be injected into question history"
 
-
 def _stub_conversation(monkeypatch, *, correct: bool, follow_up_key: str | None = None):
-    """Stub the one-to-one path: a verifier with a fixed verdict, a follow-up generator, and an
-    explainer that says unmistakably that it gave up asking.
-
-    `follow_up_key` decides whether the follow-ups are gradable, which is what picks the cap the
-    thread is measured against — a keyed root followed by keyless probes is a different thread.
-    """
     async def fake_grade(answer, question):
         return correct, False
 
@@ -174,7 +138,6 @@ def _stub_conversation(monkeypatch, *, correct: bool, follow_up_key: str | None 
     monkeypatch.setattr(teaching, "explain_answer", fake_explain)
     monkeypatch.setattr(teaching, "generate_targeted_questions", fake_follow_up)
 
-
 def _answer_once(path_id: str, cls: ClassUnit, question_id: int, answer: str):
     return run(teaching.class_audio_turn(
         path_id, cls.class_id, cls,
@@ -182,19 +145,11 @@ def _answer_once(path_id: str, cls: ClassUnit, question_id: int, answer: str):
         degraded=False, silent=False, answering_question_id=question_id,
     ))
 
-
 def test_a_keyless_question_gets_a_follow_up_before_it_is_answered_for_you(monkeypatch):
-    """A wrong answer to a question with no answer key must press once, not end the conversation.
-
-    The turn counter is read after this answer is recorded, so it already includes it. Comparing
-    it against "one turn" closed the exchange on the learner's very first reply: the student
-    answered its own question and the `?` disappeared, with no way to try again.
-    """
     _stub_conversation(monkeypatch, correct=False)
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
     run(store.save_path(_path("gp-keyless", c1, topic="Physics")))
     sid = teaching.class_session_id("gp-keyless", "c1")
-    # No answer_key: a GPU-relayed question, which the verifier can never mark correct.
     run(store.record_questions(sid, [TargetedQuestion(id=0, chunk_id=0, text="what is a wave?")]))
 
     first = _answer_once("gp-keyless", c1, 0, "uh, it is a thing that moves along")
@@ -202,19 +157,12 @@ def test_a_keyless_question_gets_a_follow_up_before_it_is_answered_for_you(monke
     assert first.question is not None and first.asked is True
     assert first.student_reply == "but why does that happen?"
 
-    # The second wrong answer is where it stops asking and teaches instead.
     second = _answer_once("gp-keyless", c1, first.question.id, "still not sure honestly")
     assert second.conversation_over is True
     assert second.student_reply == "HERE IS THE ANSWER"
     assert second.question is None
 
-
 def test_saying_you_dont_know_to_a_student_gets_the_answer_immediately(monkeypatch):
-    """Face to face, "I don't know" skips the remaining tries and hands over the answer.
-
-    Pressing again is the one response that cannot help someone who has just said they are stuck,
-    so this must not wait for the turn cap — and it must not come back as another question.
-    """
     _stub_conversation(monkeypatch, correct=False, follow_up_key="a travelling disturbance")
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
     run(store.save_path(_path("gp-idk", c1, topic="Physics")))
@@ -229,10 +177,8 @@ def test_saying_you_dont_know_to_a_student_gets_the_answer_immediately(monkeypat
     assert result.student_reply == "HERE IS THE ANSWER", "the student must answer, not re-ask"
     assert result.question is None and result.asked is False
     assert result.conversation_over is True
-    # Told, not mastered: the concept is allowed back later.
     progress = run(store.get_memory("gp-idk")).class_progress["c1"]
     assert progress.explanations_given == 1
-
 
 def test_a_correct_answer_still_ends_the_conversation(monkeypatch):
     _stub_conversation(monkeypatch, correct=True)
@@ -247,9 +193,7 @@ def test_a_correct_answer_still_ends_the_conversation(monkeypatch):
     assert result.conversation_over is True and result.answer_correct is True
     assert result.question is None
 
-
 def test_a_graded_question_presses_twice_before_answering_itself(monkeypatch):
-    """MAX_CONVERSATION_TURNS is a cap on the whole thread, counted in answers taken."""
     _stub_conversation(monkeypatch, correct=False, follow_up_key="because it carries energy")
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
     run(store.save_path(_path("gp-graded", c1, topic="Physics")))
@@ -267,14 +211,7 @@ def test_a_graded_question_presses_twice_before_answering_itself(monkeypatch):
     last = _answer_once("gp-graded", c1, question_id, "i give up on phrasing this")
     assert last.conversation_over is True and last.student_reply == "HERE IS THE ANSWER"
 
-
 def test_admitting_you_dont_know_is_answered_not_re_asked(monkeypatch):
-    """Saying "I don't know" into the room gets the answer, not another question.
-
-    The one response guaranteed not to help a stuck teacher is a fresh probe, so this branch has
-    to fire ahead of the question generator — and it has to reply out loud even in `silent` mode,
-    where every other outcome deliberately says nothing.
-    """
     _stub_conversation(monkeypatch, correct=False)
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.",
                    objectives=[ClassObjective(id="o1", text="Explain what a wave carries.")])
@@ -291,9 +228,7 @@ def test_admitting_you_dont_know_is_answered_not_re_asked(monkeypatch):
     assert result.explained is True, "the UI cannot tell an answer from chatter without this"
     assert result.asked is False and result.question is None, "a stuck teacher must not be re-probed"
 
-
 def test_typing_that_you_dont_know_is_answered_too(monkeypatch):
-    """The GPU-offline fallback owes the same answer — it is the same admission, typed."""
     _stub_conversation(monkeypatch, correct=False)
 
     async def fake_student_turn(transcript, utterance):
@@ -313,33 +248,28 @@ def test_typing_that_you_dont_know_is_answered_too(monkeypatch):
     assert result.student_reply == "HERE IS THE ANSWER", "not the student's conversational reply"
     assert result.asked is False
 
-
 @pytest.mark.parametrize("utterance", [
     "i don't know",
-    "I don’t know",          # a speech model types the curly apostrophe just as readily
+    "I don’t know",
     "hmm, I'm not sure",
     "I don't understand this at all",
     "yeah I'm totally lost here",
     "no idea, sorry",
-    "um, uh, like",          # nothing left after the filler filter is a shrug too
+    "um, uh, like",
 ])
 def test_give_up_phrasings(utterance):
     assert teaching._is_give_up(utterance), f"{utterance!r} should read as not knowing"
-
 
 @pytest.mark.parametrize("utterance", [
     "a wave carries energy without carrying matter along with it",
     "friction",
     "the alliance system pulled every great power into the war",
-    # A hedge buried in real work is a verbal tic, not surrender. Reading these as giving up takes
-    # the explanation off a learner who was most of the way through giving it.
     "uh, energy is sort of, i dunno, the ability to do stuff",
     "waves carry energy, though i'm not sure i can explain the maths",
     "the treaty was signed in 1919 and no idea why they picked that date",
 ])
 def test_a_real_explanation_is_not_mistaken_for_giving_up(utterance):
     assert not teaching._is_give_up(utterance)
-
 
 def test_end_class_folds_memory():
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
@@ -353,9 +283,8 @@ def test_end_class_folds_memory():
 
     mem = run(teaching.end_class("gp-end", "c1", c1))
     assert "Waves" in mem.covered_concepts
-    assert "Q-answered" in mem.understood      # answered -> understood
-    assert "Q-unanswered" in mem.struggled     # unanswered -> still struggled
-
+    assert "Q-answered" in mem.understood
+    assert "Q-unanswered" in mem.struggled
 
 def test_reset_class_erases_the_session_and_takes_back_its_memory():
     c1 = ClassUnit(
@@ -371,10 +300,8 @@ def test_reset_class_erases_the_session_and_takes_back_its_memory():
 
     memory = run(teaching.reset_class("gp-reset", "c1", c1))
 
-    # The session is gone: nothing for the next attempt to be judged against.
     assert run(store.get_transcript(sid)) == []
     assert run(store.get_history(sid)) == []
-    # ...and so is what the class taught the rest of the path.
     assert "Waves" not in memory.covered_concepts
     assert "Q-asked" not in memory.understood
     assert memory.asked_questions == []
@@ -382,15 +309,11 @@ def test_reset_class_erases_the_session_and_takes_back_its_memory():
     assert progress.status == "not_started" and progress.turn_count == 0
     assert progress.reset_count == 1, "in-flight writers compare this before resurrecting a class"
 
-
 def test_teaching_turn_in_flight_during_a_reset_is_dropped():
-    """_save_memory re-reads under the lock; a turn that started before the reset must not write."""
     c1 = ClassUnit(class_id="c1", title="Optics", objective="Understand optics.")
     run(store.save_path(_path("gp-inflight", c1, topic="Physics")))
-    # A deep copy on purpose: the memory store hands out its live object, while a real teaching
-    # turn holds a snapshot it deserialized before the reset. Aliasing would hide the bug.
     stale = PathMemory.model_validate(run(store.get_memory("gp-inflight")).model_dump())
-    teaching._advance_progress(stale, "c1", c1)      # the turn's snapshot, pre-reset
+    teaching._advance_progress(stale, "c1", c1)
     stale.asked_questions.append("Q-from-the-deleted-lesson")
 
     run(teaching.reset_class("gp-inflight", "c1", c1))
@@ -399,7 +322,6 @@ def test_teaching_turn_in_flight_during_a_reset_is_dropped():
     after = run(store.get_memory("gp-inflight"))
     assert after.class_progress["c1"].turn_count == 0
     assert after.asked_questions == []
-
 
 def test_end_class_is_idempotent():
     c1 = ClassUnit(class_id="c1", title="Optics", objective="Understand optics.")

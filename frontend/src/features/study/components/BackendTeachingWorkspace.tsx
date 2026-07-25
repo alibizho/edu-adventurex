@@ -7,7 +7,6 @@ type TurnResult = { teacherText: string; studentText: string; isOver: boolean };
 
 type BackendTeachingWorkspaceProps = {
   seatName: string;
-  /** This seat's sprite for the session, so the student you zoomed into is the one you saw. */
   sprite: string;
   question: TargetedQuestion;
   isBusy: boolean;
@@ -18,16 +17,6 @@ type BackendTeachingWorkspaceProps = {
   onBackToClass: () => void;
 };
 
-/**
- * One student, up close. You got here by clicking the `?` over their head, so there is exactly one
- * thing to do: answer what they asked. The mic waits for you to press it — it used to open by
- * itself on arrival, which meant walking into a conversation already being recorded, and a
- * half-formed "uh, so..." was sent as the answer before the teacher had read the question.
- *
- * It really is a conversation: the backend grades each answer against the question's answer key, so
- * a vague one earns a follow-up on the same concept rather than being accepted. The exchange ends
- * when the student is satisfied (or has run out of follow-ups) — `isOver` on the turn result.
- */
 export function BackendTeachingWorkspace({
   seatName,
   sprite,
@@ -39,16 +28,11 @@ export function BackendTeachingWorkspace({
   onTextAnswer,
   onBackToClass,
 }: BackendTeachingWorkspaceProps) {
-  // The thread so far, oldest first. `isOver` is tracked separately from "has the student said
-  // anything": a reply that comes with a follow-up means the conversation continues.
   const [turns, setTurns] = useState<{ speaker: "you" | "student"; text: string }[]>([]);
   const [isOver, setIsOver] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [draft, setDraft] = useState("");
 
-  // The audio path runs from onaudioprocess, outside React's schedule, so it cannot read the state
-  // above: between a send resolving and React committing the reset, a closing utterance would see a
-  // stale `true` and be dropped silently — the teacher's sentence vanishes and nobody replies.
   const isSendingRef = useRef(false);
 
   const startSending = () => {
@@ -88,12 +72,9 @@ export function BackendTeachingWorkspace({
     void onTextAnswer(trimmed).then(recordTurn).finally(finishSending);
   }
 
-  // Nothing left to answer: drop the mic if it happens to be open rather than record over the end
-  // of the conversation. Anything already captured is discarded — the student has stopped listening.
   useEffect(() => { if (isOver) cancel(); }, [isOver, cancel]);
 
   const busy = isBusy || isSending;
-  // What the student is saying right now: their newest line, or the question that got you here.
   const lastStudentLine = [...turns].reverse().find((turn) => turn.speaker === "student")?.text;
 
   return (
@@ -104,15 +85,20 @@ export function BackendTeachingWorkspace({
 
       <div className="student-speech" role="status" aria-live="polite">
         <strong className="student-speech-name">{seatName}</strong>
+
         <p>{lastStudentLine ?? question.text}</p>
+
         {turns.length > 2 && (
           <ol className="student-speech-thread">
             {turns.slice(0, -2).map((turn, index) => (
               <li key={index} className={`thread-turn thread-turn--${turn.speaker}`}>
                 <span>{turn.speaker === "you" ? "YOU" : seatName}</span> {turn.text}
+
               </li>
+
             ))}
           </ol>
+
         )}
       </div>
 
@@ -120,9 +106,11 @@ export function BackendTeachingWorkspace({
         <button type="button" className="acknowledgement-button" onClick={onBackToClass}>
           BACK TO CLASS
         </button>
+
       ) : !voiceAvailable ? (
         <div className="backend-text-control">
           <label htmlFor="zoom-answer">GPU VOICE ANALYSIS OFFLINE — TYPE YOUR ANSWER</label>
+
           <textarea
             id="zoom-answer"
             value={draft}
@@ -136,13 +124,16 @@ export function BackendTeachingWorkspace({
               }
             }}
           />
+
           <button type="button" className="solid-action" disabled={!draft.trim() || busy} onClick={sendText}>
             {busy ? "SENDING..." : "ANSWER"}
           </button>
+
         </div>
+
       ) : (
         <div className="voice-control">
-          {/* The whole control: press once to record your answer, press again to send it. */}
+          {}
           <button
             type="button"
             className={`voice-button${recorder.isRecording ? " is-listening" : ""}${recorder.isArmed ? " is-armed" : ""}`}
@@ -153,29 +144,40 @@ export function BackendTeachingWorkspace({
           >
             <PixelMicIcon />
           </button>
+
           <strong>
             {busy ? "THINKING..."
               : recorder.state === "starting" ? "OPENING THE MIC..."
               : recorder.isRecording ? `RECORDING ${formatElapsed(recorder.elapsedSeconds)} — PRESS AGAIN TO SEND`
               : "PRESS THE MIC TO ANSWER"}
           </strong>
+
           {recorder.isArmed && (
             <div className="mic-meter" aria-hidden="true">
               <div className="mic-meter-fill" ref={recorder.meterRef} />
+
             </div>
+
           )}
           {recorder.isRecording && (
             <button type="button" className="outline-action discard-take" onClick={cancel}>
               DISCARD
             </button>
+
           )}
           {question.anomaly_type && <span>DETECTED: {question.anomaly_type.replaceAll("_", " ").toUpperCase()}</span>}
+
         </div>
+
       )}
 
       {(error || recorder.error) && <p className="conversation-completion-error" role="alert">{error ?? recorder.error}</p>}
+
       <button type="button" className="back-to-material" disabled={busy} onClick={onBackToClass}>← BACK TO CLASS</button>
+
       <div className="conversation-footer" aria-hidden="true"><i /><i /><i /></div>
+
     </section>
+
   );
 }

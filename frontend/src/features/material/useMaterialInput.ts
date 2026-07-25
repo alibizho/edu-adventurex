@@ -65,14 +65,6 @@ type UseMaterialInputOptions = {
   onPrepared: (path: GrowthPath) => void;
 };
 
-/**
- * One build event, as the console lines it prints. Empty strings are blank lines — the readout is
- * grouped by agent, the way the pipeline actually runs.
- *
- * Class titles are printed twice on purpose: once as the structuring call returns them (that is
- * the course taking shape) and again as each one's material is written, which is the slow half and
- * the only part with anything to count.
- */
 function pipelineLines(event: BuildEvent): string[] {
   switch (event.stage) {
     case "topic":
@@ -105,7 +97,6 @@ export function useMaterialInput({ onPrepared }: UseMaterialInputOptions) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [scopeSuggestions, setScopeSuggestions] = useState<ScopeSuggestion[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  // The build readout, empty until a build starts. Non-empty is what puts the loading screen up.
   const [pipeline, setPipeline] = useState<string[]>([]);
   const preparedMaterial = useRef<{ originalInput: string; materialText: string | null } | null>(null);
 

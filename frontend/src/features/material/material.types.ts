@@ -21,4 +21,3 @@ export type MaterialSubmissionSummary = {
   }>;
   submittedAt: string;
 };
-

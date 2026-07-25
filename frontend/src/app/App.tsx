@@ -14,12 +14,20 @@ export function App() {
       <ScrollToTop />
       <Routes>
         <Route path={ROUTES.material} element={<MaterialPage />} />
+
         <Route path={ROUTES.concepts} element={<ConceptPage />} />
+
         <Route path={ROUTES.study} element={<StudyPage />} />
+
         <Route path={ROUTES.summary} element={<SummaryPage />} />
+
         <Route path={ROUTES.map} element={<KnowledgeMapPage />} />
+
         <Route path="*" element={<NotFoundPage />} />
+
       </Routes>
+
     </>
+
   );
 }

@@ -36,17 +36,18 @@ export function MaterialPage() {
     if (prompt) materialInput.updateText(prompt);
   }
 
-  // A build takes most of a minute (a model call per class), so it takes over the screen rather
-  // than leaving the form sitting there disabled with no sign of what is happening.
   if (materialInput.pipeline.length > 0) {
     return (
       <div className="screen material-screen">
         <AppHeader />
         <main className="material-main">
           <GeneratingTopics lines={materialInput.pipeline} />
+
         </main>
+
         <StatusBar label="BUILDING YOUR COURSE" />
       </div>
+
     );
   }
 
@@ -72,11 +73,14 @@ export function MaterialPage() {
         {materialInput.warnings.length > 0 && (
           <div className="material-api-notice" role="status">
             {materialInput.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+
           </div>
+
         )}
         {materialInput.scopeSuggestions.length > 0 && (
           <section className="material-scope retro-panel" aria-labelledby="scope-title">
             <h2 id="scope-title">CHOOSE A FOCUSED LEARNING PATH</h2>
+
             <div>
               {materialInput.scopeSuggestions.map((suggestion) => (
                 <button
@@ -86,11 +90,16 @@ export function MaterialPage() {
                   onClick={() => materialInput.buildConfirmedTopic(suggestion.topic, suggestion.suggested_classes)}
                 >
                   <strong>{suggestion.topic}</strong>
+
                   <span>{suggestion.rationale}</span>
+
                 </button>
+
               ))}
             </div>
+
           </section>
+
         )}
         <div className="material-shortcuts" aria-label="Suggested learning topics">
           {MATERIAL_PAGE_CONTENT.shortcuts.map((shortcut, index) => (
@@ -103,10 +112,15 @@ export function MaterialPage() {
             >
               {shortcut.label}
             </button>
+
           ))}
         </div>
+
       </main>
+
       <StatusBar label={STATUS_LABELS[materialInput.status]} />
+
     </div>
+
   );
 }

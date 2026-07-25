@@ -1,6 +1,5 @@
 export type BackendClassProgress = {
   status: "not_started" | "in_progress" | "complete";
-  /** % of this class's objectives actually covered — not a turn counter. */
   readiness: number;
   turn_count: number;
   started_at: number | null;
@@ -9,9 +8,7 @@ export type BackendClassProgress = {
   analysis_status: "not_started" | "pending" | "running" | "complete" | "failed";
   analysis_error: string | null;
   covered_objectives: string[];
-  /** objective id -> the sentence the learner said that earned it. */
   objective_evidence: Record<string, string>;
-  /** Ended having covered everything, as opposed to just stopping. */
   passed_on_mastery: boolean;
 };
 
@@ -34,7 +31,6 @@ export type ClassUnit = {
   class_id: string;
   title: string;
   objective: string;
-  /** The checkable breakdown. Empty on plans built before objectives existed. */
   objectives: ClassObjective[];
   difficulty: string;
   prerequisites: string[];
@@ -42,7 +38,6 @@ export type ClassUnit = {
   notes_generated: boolean;
 };
 
-/** What the class is graded on. Mirrors `ClassUnit.checklist()` on the backend. */
 export function classChecklist(unit: ClassUnit): ClassObjective[] {
   return unit.objectives.length > 0 ? unit.objectives : [{ id: "o1", text: unit.objective }];
 }
@@ -127,18 +122,9 @@ export type TargetedQuestion = {
   text: string;
   anomaly_type: string | null;
   rationale: string | null;
-  /** The question this one follows up on, when the student is still chasing the same concept. */
   parent_id?: number | null;
 };
 
-/**
- * One stage of `POST /plan/build/stream`. Every event is something that finished, so the loading
- * screen is a readout rather than a progress bar guessing at how long is left.
- *
- * `class` fires once per title the structuring call returned; `written` fires as each class's
- * material lands, in arrival order (they are written in parallel), so `index` is a count, not a
- * position in the course.
- */
 export type BuildEvent =
   | { stage: "topic"; topic: string; classes: number }
   | { stage: "structuring"; topic: string; classes: number }
@@ -153,11 +139,6 @@ export type ClassTeachResponse = {
   new_segment: BackendSegment;
   asked: boolean;
   question: TargetedQuestion | null;
-  /**
-   * `student_reply` is the answer to what the teacher was stuck on, not a student talking — set
-   * when they admitted they didn't know. The two need telling apart: one is a line of chatter,
-   * the other is what the learner is now meant to read.
-   */
   explained?: boolean;
 };
 
@@ -165,13 +146,9 @@ export type AudioClassTeachResponse = Omit<ClassTeachResponse, "new_segment"> & 
   new_segment: BackendSegment | null;
   analysis: ChunkAnalysis;
   degraded: boolean;
-  /** Nothing left to teach in this class — lets the UI distinguish "following you" from silence. */
   all_goals_covered: boolean;
-  /** Whether the answer conveyed the question's key. null when nothing was graded. */
   answer_correct?: boolean | null;
-  /** The student is done with this question — satisfied, or out of follow-ups. */
   conversation_over?: boolean;
-  /** Answers given in this thread so far. */
   turns_used?: number;
 };
 

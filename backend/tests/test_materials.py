@@ -1,11 +1,9 @@
-"""Hermetic material extraction tests. OCR engines are stubbed where appropriate."""
 from io import BytesIO
 
 import pytest
 from PIL import Image
 
 from app import materials
-
 
 def test_txt_and_markdown_are_combined_without_persisting_bytes():
     result = materials.extract_materials([
@@ -17,7 +15,6 @@ def test_txt_and_markdown_are_combined_without_persisting_bytes():
     assert [item.name for item in result.files] == ["lesson.txt", "notes.md"]
     assert result.truncated is False
 
-
 def test_image_uses_english_ocr(monkeypatch):
     stream = BytesIO()
     Image.new("RGB", (8, 8), "white").save(stream, format="PNG")
@@ -27,7 +24,6 @@ def test_image_uses_english_ocr(monkeypatch):
     ])
     assert "Printed English text" in result.material_text
     assert result.files[0].extracted_characters == len("Printed English text")
-
 
 def test_limits_unsupported_and_duplicate_files_are_atomic():
     with pytest.raises(materials.MaterialExtractionError, match="UNSUPPORTED"):
@@ -42,14 +38,12 @@ def test_limits_unsupported_and_duplicate_files_are_atomic():
             (f"{index}.txt", "text/plain", b"x") for index in range(11)
         ])
 
-
 def test_material_text_is_truncated_to_generation_limit():
     payload = b"a" * (materials.MAX_EXTRACTED_CHARACTERS + 500)
     result = materials.extract_materials([("long.txt", "text/plain", payload)])
     assert result.truncated is True
     assert len(result.material_text) == materials.MAX_EXTRACTED_CHARACTERS
     assert any("TRUNCATED" in warning for warning in result.warnings)
-
 
 def test_dangerous_filename_is_reduced_to_basename():
     result = materials.extract_materials([

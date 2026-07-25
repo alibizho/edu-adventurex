@@ -37,8 +37,6 @@
   .growth-track {
     position: relative;
     display: grid;
-    /* One row whatever the class count. Hardcoded at 4 columns, a 5-class course dropped its last
-       class onto a second row with the connecting line still spanning only the first. */
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
     gap: 20px;
@@ -53,8 +51,6 @@
     height: 4px;
     background: var(--ink);
   }
-  /* Each stop is a button — the summary is where the next class gets chosen, so the timeline is
-     the navigation, not a picture of one. Button chrome is stripped back to the plain mark. */
   .growth-stop {
     position: relative;
     z-index: 1;
@@ -90,11 +86,8 @@
     font-size: 28px;
   }
   .growth-stop--completed b { background: var(--ink); color: var(--paper); }
-  /* Part-way through: distinct from both a finished class and one never opened, which used to
-     look identical. */
   .growth-stop--active b { border-style: double; border-width: 8px; }
   .growth-stop--open b { color: var(--muted); }
-  /* The class this summary is about. */
   .growth-stop.is-current b { box-shadow: 0 0 0 4px var(--paper), 0 0 0 8px var(--ink); }
   .growth-stop strong { max-width: 145px; font-size: 11px; line-height: 1.25; }
 
@@ -128,8 +121,6 @@
   .statistics-panel dl > div { min-height: 78px; display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 3px dashed var(--gray); }
   .statistics-panel dl > div:last-child { border-bottom: 0; }
   .statistics-panel dt { padding-bottom: 15px; font-size: 12px; }
-  /* What the number above it actually counts. Always visible rather than behind a hover: these
-     read once and then stop being needed, and a tooltip is nothing at all on a touch screen. */
   .statistics-panel dt span {
     display: block;
     max-width: 34ch;

@@ -7,10 +7,6 @@ import { PixelTeacherAvatar } from "../visuals/PixelTeacherAvatar";
 export function AppHeader() {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  // Two ways in, and that is the whole model: start something new, or open the map and pick a
-  // class off it. TEACH pointed at whichever class was last opened — a bookmark, not a place —
-  // and it sat next to a PROGRESS page that showed a table of the same classes the map already
-  // draws. Everything you can teach is reachable from the map.
   const navItems = [
     { label: "HOME", to: ROUTES.material, end: true },
     { label: "MAP", to: ROUTES.map, end: false },
@@ -29,6 +25,7 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <NavLink className="brand" to={ROUTES.material} aria-label="WUT? home">WUT?</NavLink>
+
       <nav
         id="primary-navigation"
         className={`primary-nav ${isMenuOpen ? "is-open" : ""}`}
@@ -44,8 +41,10 @@ export function AppHeader() {
           >
             {label}
           </NavLink>
+
         ))}
       </nav>
+
       <div className="header-tools">
         <button
           type="button"
@@ -57,8 +56,12 @@ export function AppHeader() {
         >
           {isMenuOpen ? <X size={29} strokeWidth={3} /> : <Menu size={29} strokeWidth={3} />}
         </button>
+
         <div className="teacher-profile"><PixelTeacherAvatar /></div>
+
       </div>
+
     </header>
+
   );
 }

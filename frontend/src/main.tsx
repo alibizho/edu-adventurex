@@ -14,6 +14,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <App />
       </BrowserRouter>
+
     </SessionProvider>
+
   </React.StrictMode>,
+
 );

@@ -20,9 +20,6 @@
     text-align: center;
   }
 
-  /* Centres its children for any node count. The old absolute percent slots left one path stranded
-     near the top-left and made a seventh path overlap the first. `padding-top` keeps the nodes
-     clear of .map-back, which stays absolutely positioned in this same box. */
   .domain-map,
   .domain-concept-map {
     position: relative;

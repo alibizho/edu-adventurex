@@ -4,7 +4,6 @@
   .concept-title { font-size: clamp(36px, 3.5vw, 56px); padding: 18px 38px 14px; letter-spacing: 4px; }
   .concept-stage { position: relative; width: min(1280px, 94vw); height: 820px; margin: 20px auto 0; }
 
-  /* The spokes. Under everything, and untouchable — the nodes are the only things you can click. */
   .concept-links {
     position: absolute;
     inset: 0;
@@ -15,12 +14,10 @@
     overflow: visible;
   }
   .concept-links line { stroke: var(--ink); stroke-width: 3; opacity: .42; }
-  /* The chosen topic's line to the subject, drawn as the one that matters. */
   .concept-links line.is-active { stroke-width: 6; opacity: 1; }
 
   .concept-node {
     --size: 176px;
-    /* How many lines of title the box can hold before the rest is elided. */
     --lines: 4;
     position: absolute;
     left: var(--x);
@@ -47,9 +44,6 @@
     overflow: hidden;
   }
 
-  /* Generated class titles are whole sentences, not the one-word labels the fixture map used, so
-     the label has to be able to wrap, break a word that is wider than the box, and stop after a
-     few lines rather than growing out through the border. */
   .concept-node .node-label {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -57,7 +51,7 @@
     line-clamp: var(--lines);
     max-width: 100%;
     overflow: hidden;
-    white-space: pre-line;   /* the fixture labels carry their own line breaks */
+    white-space: pre-line;
     overflow-wrap: anywhere;
   }
 
@@ -69,12 +63,10 @@
   .concept-node.is-selected:focus-visible { outline-color: var(--gray); }
   .concept-node.small { --size: 140px; }
   .concept-node.wide { width: 224px; height: 136px; }
-  /* A circle wastes its corners, so the same text needs a wider box and more inset than a square. */
   .concept-node.circle { border-radius: 50%; padding: 18px; }
   .concept-node.hero { --size: 248px; --lines: 5; padding: 30px; font-size: 19px; }
   .concept-node.small-circle { --size: 138px; --lines: 3; font-size: 11px; }
   .concept-node.medium-circle { --size: 160px; font-size: 11px; }
-  /* The icons share the box with the title now, so they take a little less of it. */
   .concept-node svg { width: 22px; height: 22px; flex: 0 0 auto; }
   .node-solid { width: 30px; height: 30px; flex: 0 0 auto; background: currentColor; }
   .node-grid { width: 30px; flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
@@ -103,8 +95,6 @@
     .concept-screen { padding-bottom: 235px; }
     .concept-main { min-height: auto; padding-bottom: 24px; }
     .concept-stage { height: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 40px 20px; }
-    /* The stage becomes a plain grid here, so the spokes would be drawn between coordinates
-       nothing sits at any more. */
     .concept-links { display: none; }
     .concept-node, .concept-node.small, .concept-node.wide, .concept-node.circle, .concept-node.hero, .concept-node.small-circle, .concept-node.medium-circle {
       position: static;

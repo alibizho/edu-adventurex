@@ -55,6 +55,7 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
       <AppHeader />
       {isClosing ? (
         <SessionExitScene studyModule={studyModule} onComplete={handleExitComplete} />
+
       ) : isLobby ? (
         <Classroom
           studyModule={studyModule}
@@ -63,6 +64,7 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
           onReturnToReading={session.returnToReading}
           onEnterZoom={session.startConversation}
         />
+
       ) : (
         <>
           <main className="study-layout">
@@ -85,24 +87,33 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
                   onFinish={handleGuidedCompletion}
                   onBackToMaterial={session.returnToReading}
                 />
+
               ) : (
                 <>
                   <ModuleBanner label={studyModule.moduleLabel} title={studyModule.title} />
+
                 <LearningDocument
                   document={studyModule.document}
                   isReady={false}
                   onReady={session.markReady}
                 />
+
                 </>
+
               )}
             </section>
+
           </main>
+
           {!isConversation && (
             <StatusBar label={session.statusLabel} full meta={studyModule.status.meta} />
+
           )}
         </>
+
       )}
     </div>
+
   );
 }
 
@@ -114,6 +125,7 @@ export function StudyPage() {
   const classId = searchParams.get("class");
   if (pathId && classId) {
     return <BackendStudyExperience key={`${pathId}:${classId}`} pathId={pathId} classId={classId} />;
+
   }
   const conceptId = resolveStudyConceptId(
     searchParams.get("concept"),
@@ -122,4 +134,5 @@ export function StudyPage() {
   const studyModule = getStudyModule(conceptId);
 
   return <StudyExperience key={studyModule.conceptId} studyModule={studyModule} />;
+
 }

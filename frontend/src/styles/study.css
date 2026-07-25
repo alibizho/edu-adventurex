@@ -3,7 +3,6 @@
   .study-layout {
     min-height: calc(100vh - var(--header-height) - var(--footer-height));
     display: grid;
-    /* One column: the material is the page. The 350px sidebar that used to sit here is gone. */
     grid-template-columns: minmax(0, 1fr);
   }
   .student-sidebar { border-right: 5px solid var(--ink); background: var(--paper); }
@@ -24,12 +23,8 @@
   .module-banner {
     position: relative;
     width: min(1030px, 100%);
-    /* Grows with the title. Fixed at 160px, any class title that wrapped to two lines spilled its
-       second line out of the black bar and onto the page behind it. */
     min-height: 160px;
     margin: 0 auto 28px;
-    /* Top padding clears the absolutely-placed label, the sides clear the info icon — so the
-       title can centre in what is left instead of being nudged down by a margin. */
     padding: 64px 74px 26px;
     display: grid;
     place-items: center;
@@ -41,8 +36,6 @@
   .module-banner h1 {
     margin: 0;
     font-family: var(--font-display);
-    /* Titles here are a whole sentence ("The Outbreak of World War I: Causes and Early Events"),
-       not a word, so the ceiling is well below the old 66px. */
     font-size: clamp(28px, 3.4vw, 50px);
     line-height: 1.06;
     letter-spacing: 3px;

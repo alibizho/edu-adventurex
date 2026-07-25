@@ -10,11 +10,6 @@ import { apiMessage } from "../learning-data/apiClient";
 import { backendLearningDataSource } from "../learning-data/backendLearningDataSource";
 import type { GrowthPath } from "../learning-data/backend.types";
 
-/**
- * Where a generated class lands on the map. The 4th is the hub every other node draws a line to,
- * so it sits in the middle; the rest are spaced to clear it and each other at the sizes in
- * concepts.css. Positions are percentages of the stage — move a node and its spoke follows.
- */
 const DYNAMIC_NODE_LAYOUT: ReadonlyArray<Pick<ConceptNodeConfig, "shape" | "x" | "y" | "icon">> = [
   { shape: "square", x: 22, y: 32, icon: "solid" },
   { shape: "square small", x: 48, y: 20 },
@@ -81,25 +76,35 @@ export function ConceptPage() {
       <AppHeader />
       <main className="concept-main halftone-screen">
         <h1 className="boxed-title concept-title">SELECT A CONCEPT TO START TEACHING</h1>
+
         {isLoading ? (
           <div className="concept-api-state retro-panel" role="status">BUILDING YOUR LEARNING PATH...</div>
+
         ) : loadError ? (
           <div className="concept-api-state retro-panel" role="alert">
             <strong>LEARNING PATH UNAVAILABLE</strong>
+
             <p>{loadError}</p>
+
             <button type="button" className="solid-action" onClick={() => navigate(ROUTES.material)}>BACK HOME</button>
+
           </div>
+
         ) : (
           <ConceptMap
             concepts={concepts}
             selectedConceptId={selectedConceptId}
             onSelect={handleSelect}
           />
+
         )}
       </main>
+
       <div className="concept-footer">
         <StatusBar label={loadError ? "BACKEND_ERROR" : selectedConcept ? "SELECTION READY" : "WAITING FOR INPUT"} />
+
         <div className="concept-build">OCEAN SIMULATION: V1.0.4&nbsp; | &nbsp;DITHERING MODE: ACTIVE</div>
+
         <button
           type="button"
           className="solid-action confirm-action"
@@ -108,7 +113,10 @@ export function ConceptPage() {
         >
           CONFIRM SELECTION
         </button>
+
       </div>
+
     </div>
+
   );
 }
