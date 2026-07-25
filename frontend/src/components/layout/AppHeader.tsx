@@ -7,15 +7,12 @@ import { PixelTeacherAvatar } from "../visuals/PixelTeacherAvatar";
 export function AppHeader() {
   const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const activePath = localStorage.getItem("wut:active-path");
-  const activeClass = localStorage.getItem("wut:active-class");
-  const teachRoute = activePath && activeClass
-    ? `${ROUTES.study}?path=${encodeURIComponent(activePath)}&class=${encodeURIComponent(activeClass)}`
-    : ROUTES.study;
+  // Two ways in, and that is the whole model: start something new, or open the map and pick a
+  // class off it. TEACH pointed at whichever class was last opened — a bookmark, not a place —
+  // and it sat next to a PROGRESS page that showed a table of the same classes the map already
+  // draws. Everything you can teach is reachable from the map.
   const navItems = [
     { label: "HOME", to: ROUTES.material, end: true },
-    { label: "TEACH", to: teachRoute, end: false },
-    { label: "PROGRESS", to: ROUTES.progress, end: false },
     { label: "MAP", to: ROUTES.map, end: false },
   ] as const;
 

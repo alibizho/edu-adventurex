@@ -13,7 +13,7 @@ import type { StudyToolConfig, StudyToolId } from "../study/study.types";
 import { BackendSummaryPage } from "./BackendSummaryPage";
 
 const SUMMARY_TOOLS: readonly StudyToolConfig[] = [
-  { id: "progress", label: "Progress" },
+  { id: "map", label: "Map" },
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ];
@@ -66,8 +66,8 @@ function LegacySummaryPage() {
   }, [conceptId, getSessionSummary]);
 
   function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "progress") {
-      navigate(conceptId ? `${ROUTES.progress}?concept=${conceptId}` : ROUTES.progress);
+    if (toolId === "map") {
+      navigate(ROUTES.map);
       return;
     }
     if (toolId === "tutorial") {

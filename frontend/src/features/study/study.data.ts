@@ -8,7 +8,7 @@ import type {
 } from "./study.types";
 
 const STUDY_TOOLS: readonly StudyToolConfig[] = [
-  { id: "progress", label: "Progress" },
+  { id: "map", label: "Map" },
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ];

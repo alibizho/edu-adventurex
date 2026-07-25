@@ -37,7 +37,10 @@ export function KnowledgeMapPage() {
                   type="button"
                   key={unit.class_id}
                   className={`map-node concept-map-node map-node--${status}`}
-                  onClick={() => navigate(`${status === "complete" ? ROUTES.summary : ROUTES.study}?path=${encodeURIComponent(selected.path.path_id)}&class=${encodeURIComponent(unit.class_id)}`)}
+                  // Always the class itself, finished or not: the map is the way in, and what you
+                  // want on arriving is the material. A completed class used to open its summary
+                  // instead, so the one route to re-teaching something was to not have learnt it.
+                  onClick={() => navigate(`${ROUTES.study}?path=${encodeURIComponent(selected.path.path_id)}&class=${encodeURIComponent(unit.class_id)}`)}
                 >
                   <i /><strong>{unit.title}</strong><span>{progress?.readiness ?? 0}%</span>
                 </button>

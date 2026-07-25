@@ -44,8 +44,8 @@ export function useStudySession(studyModule: StudyModule) {
   }
 
   function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "progress") {
-      navigate(`${ROUTES.progress}?concept=${studyModule.conceptId}`);
+    if (toolId === "map") {
+      navigate(ROUTES.map);
       return;
     }
 

@@ -44,9 +44,8 @@ Keys live server-side in `backend/.env` only.
 | `/` | `MaterialPage` | Topic input + file upload → `/materials/extract` → `/plan/scope` → `/plan/build`. |
 | `/concepts` | `ConceptPage` | The generated classes, as a mermaid map. Pick one to teach. |
 | `/study` | `StudyPage` | The teaching session: notes, AI-student sidebar, mic. |
-| `/progress` | `ProgressPage` | Per-class readiness across every stored path. |
 | `/summary` | `SummaryPage` | Post-class transfer-delta result (polls the analysis job). |
-| `/map` | `KnowledgeMapPage` | All growth paths. |
+| `/map` | `KnowledgeMapPage` | Every growth path, and the way into any class. |
 | `*` | `NotFoundPage` | |
 
 ## Talking to the backend

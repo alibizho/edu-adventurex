@@ -10,7 +10,7 @@ import { ObjectiveChecklist } from "../study/components/ObjectiveChecklist";
 import { StudentSidebar } from "../study/components/StudentSidebar";
 import type { StudyToolId } from "../study/study.types";
 
-const TOOLS = [{ id: "progress", label: "Progress" }, { id: "tutorial", label: "Tutorial" }, { id: "reset", label: "Reset" }] as const;
+const TOOLS = [{ id: "map", label: "Map" }, { id: "tutorial", label: "Tutorial" }, { id: "reset", label: "Reset" }] as const;
 
 /**
  * What each number on the statistics panel actually counts, in one line.
@@ -129,7 +129,7 @@ export function BackendSummaryPage({ pathId, classId }: { pathId: string; classI
   }
 
   function handleTool(tool: StudyToolId) {
-    if (tool === "progress") navigate(`${ROUTES.progress}?path=${encodeURIComponent(pathId)}`);
+    if (tool === "map") navigate(ROUTES.map);
     else if (tool === "tutorial") setMessage("THE SUMMARY UPDATES AUTOMATICALLY WHEN BACKGROUND ANALYSIS FINISHES.");
     else void load();
   }

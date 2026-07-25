@@ -24,7 +24,7 @@ import { useContinuousRecorder, type SpeechProsody } from "./useContinuousRecord
 import type { StudyModule, StudyToolId } from "./study.types";
 
 const TOOLS = [
-  { id: "progress", label: "Progress" },
+  { id: "map", label: "Map" },
   { id: "tutorial", label: "Tutorial" },
   { id: "reset", label: "Reset" },
 ] as const;
@@ -361,8 +361,8 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   }, [classId, navigate, pathId]);
 
   function handleToolAction(toolId: StudyToolId) {
-    if (toolId === "progress") {
-      navigate(`${ROUTES.progress}?path=${encodeURIComponent(pathId)}`);
+    if (toolId === "map") {
+      navigate(ROUTES.map);
       return;
     }
     if (toolId === "tutorial") {

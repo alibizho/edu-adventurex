@@ -11,7 +11,7 @@ type StudentSidebarProps = {
 };
 
 function StudyToolIcon({ toolId }: { toolId: StudyToolId }) {
-  if (toolId === "progress") return <ArrowUpRight size={26} strokeWidth={3} aria-hidden="true" />;
+  if (toolId === "map") return <ArrowUpRight size={26} strokeWidth={3} aria-hidden="true" />;
   if (toolId === "tutorial") return <CircleHelp size={27} strokeWidth={3} aria-hidden="true" />;
   return <RotateCcw size={27} strokeWidth={3} aria-hidden="true" />;
 }
