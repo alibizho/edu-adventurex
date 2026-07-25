@@ -23,13 +23,15 @@ endpoints are under the `/plan` prefix and are auto-documented at `/docs`.
         │                          scoped?    → confirmed topic
         │  (learner picks a topic)
         ▼
- ②  POST /plan/build ───────────► GrowthPath: ~5 ordered classes
-        │                          (titles + objectives, NO notes yet)
+ ②  POST /plan/build ───────────► GrowthPath: ~5 ordered classes,
+        │                          titles + objectives + every class's
+        │                          teacher's notes, written together so
+        │                          no two classes teach the same thing
         │
         │  ┌──────────────── for each class, in order ───────────────┐
         ▼  ▼                                                          │
- ③  POST /plan/{id}/class/{cid}/notes  ─► Markdown teacher's notes    │
-        │      (learner reads it to prepare to teach)                 │
+ ③  POST /plan/{id}/class/{cid}/notes  ─► the primer, rewritten       │
+        │      (backfill / ?regenerate=true — normally already there) │
         ▼                                                             │
  ④  POST /plan/{id}/class/{cid}/teach/turn  (repeat many times)       │
         │   learner teaches → AI student replies;                     │
@@ -62,8 +64,8 @@ ClassUnit:                           # one class = one topic (no subtopics)
   objective: str                     # one-sentence learning goal
   difficulty: str                    # "beginner" | "intermediate" | "advanced"
   prerequisites: list[str]           # class_ids that should come first
-  teacher_notes: str                 # Markdown primer (filled lazily)
-  notes_generated: bool              # false until /notes has run
+  teacher_notes: str                 # Markdown primer (written by /plan/build)
+  notes_generated: bool              # false only if that write failed, or on an older path
 
 PathMemory:                          # cross-class memory (per path_id)
   path_id: str
@@ -121,10 +123,19 @@ Decide whether the request is teachable as-is. If it spans multiple domains (e.g
 
 ---
 
-## ② `POST /plan/build` — build the plan skeleton
+## ② `POST /plan/build` — build the plan, material and all
 
-Turns a confirmed topic into an ordered set of classes. **No teacher's notes yet** — those are
-generated lazily, one class at a time.
+Turns a confirmed topic into an ordered set of classes **and writes every class's teacher's notes**.
+
+Two model steps: one structures the course (titles, objectives, order), then one call per class —
+fired in parallel, capped at `settings.notes_concurrency` — writes the material. Each of those
+calls is shown the whole outline, split into the classes taught *before* this one and the ones
+taught *after*, with their objectives. That is what stops class 3 re-teaching class 1: a primer
+written alone knows only its own title and has to guess where its neighbours' ground begins.
+
+So this is the slow call in the plan surface (N+1 model calls, tens of seconds). If a class's
+notes call fails it comes back with `notes_generated: false` and ④ fills it on demand — a
+rate-limited notes tier never costs the learner the course.
 
 **Request** — `BuildPlanRequest`
 ```json
@@ -151,8 +162,8 @@ generated lazily, one class at a time.
       "objective": "Learner will be able to define a force, identify common types of forces, and explain how forces affect the motion of an object.",
       "difficulty": "beginner",
       "prerequisites": [],
-      "teacher_notes": "",
-      "notes_generated": false
+      "teacher_notes": "## Introduction to Forces\n\nA **force** is simply a push or a pull...",
+      "notes_generated": true
     },
     {
       "class_id": "c2",
@@ -160,8 +171,8 @@ generated lazily, one class at a time.
       "objective": "Learner will be able to state and apply Newton's three laws of motion to predict the behavior of objects under various forces.",
       "difficulty": "beginner",
       "prerequisites": ["c1"],
-      "teacher_notes": "",
-      "notes_generated": false
+      "teacher_notes": "## Newton's Laws of Motion\n\nYou already know what a force does...",
+      "notes_generated": true
     },
     {
       "class_id": "c3",
@@ -169,8 +180,8 @@ generated lazily, one class at a time.
       "objective": "Learner will be able to solve real-world problems involving friction, tension, and inclined planes using free-body diagrams and Newton's laws.",
       "difficulty": "intermediate",
       "prerequisites": ["c1", "c2"],
-      "teacher_notes": "",
-      "notes_generated": false
+      "teacher_notes": "## Applications of Forces and Motion\n\nFree-body diagrams turn a word...",
+      "notes_generated": true
     }
   ],
   "source_material_summary": null
@@ -179,14 +190,16 @@ generated lazily, one class at a time.
 
 - `num_classes` is optional (defaults to `settings.default_classes` = 5). An explicit `0` is not
   silently swapped for the default; it's clamped to a minimum of 1.
+- `material_text` is used in full here (the first 4 000 chars per class) — this is the only moment
+  the whole upload is in hand, since only a 500-char `source_material_summary` is stored.
 - The plan is **saved** — fetch it again anytime with ③.
 
 ---
 
 ## ③ `GET /plan/{path_id}` — fetch the plan
 
-Returns the stored `GrowthPath` (same shape as ②), with `teacher_notes` filled in for whichever
-classes have had ④ run. `404` if the `path_id` is unknown.
+Returns the stored `GrowthPath` (same shape as ②), `teacher_notes` and all. `404` if the `path_id`
+is unknown.
 
 ```
 GET /plan/gp-18d8e54a  →  200  { ...GrowthPath... }
@@ -194,11 +207,17 @@ GET /plan/gp-18d8e54a  →  200  { ...GrowthPath... }
 
 ---
 
-## ④ `POST /plan/{path_id}/class/{class_id}/notes` — teacher's notes ("before each class")
+## ④ `POST /plan/{path_id}/class/{class_id}/notes` — rewrite one class's notes
 
-Generates a **brief Markdown primer** (~200–400 words) the learner reads to prepare to teach. May
-embed **one** ```` ```mermaid ```` diagram; **never images**. It's told what earlier classes
-covered (from the class order + memory) so it builds on them instead of repeating.
+The **brief Markdown primer** (~200–400 words) the learner reads to prepare to teach. May embed
+**one** ```` ```mermaid ```` diagram; **never images**.
+
+② normally wrote this already, so the route is the backfill and exists for three cases: a path
+built before notes were eager, a class whose eager write failed, and `?regenerate=true` once the
+learner has actually taught some classes — that last one is the only version of the primer that
+can see cross-class **memory**, which is empty at build time by definition.
+
+Already-generated notes are returned as-is; pass `?regenerate=true` to spend the call.
 
 **Request:** none (path params only).
 
@@ -396,7 +415,7 @@ PID=$(curl -s $BASE/plan/build -H 'content-type: application/json' \
   -d '{"original_input":"I want to learn physics","confirmed_topic":"Classical Mechanics: Forces and Motion","num_classes":3}' \
   | python -c 'import sys,json;print(json.load(sys.stdin)["path_id"])')
 
-# ③ notes for the first class
+# ③ the first class's notes — already written by the build; this just reads them back
 curl -s $BASE/plan/$PID/class/c1/notes
 
 # ④ teach a turn

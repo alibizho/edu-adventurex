@@ -23,6 +23,7 @@ import app.curriculum.build as build  # noqa: E402
 import app.curriculum.teaching as teaching  # noqa: E402
 import app.api.plan_routes as plan_routes  # noqa: E402
 from app.main import app  # noqa: E402
+from app.store import store  # noqa: E402
 from app.schemas import (  # noqa: E402
     ClassObjective,
     ClassUnit,
@@ -38,6 +39,10 @@ from app.schemas import (  # noqa: E402
 )
 
 client = TestClient(app)
+
+# The real eager fan-out, held before `_stub_llm` replaces it. The eager-notes tests below put it
+# back so the actual prompt builder, semaphore and failure handling get exercised.
+_REAL_ALL_NOTES = build.generate_all_class_notes
 
 
 async def _never_probe(cls, objective, transcript):
@@ -65,7 +70,10 @@ EXPLAIN_CALLS: list[dict] = []
 def _stub_llm():
     """Stub the LLM-touching functions with deterministic fakes. scope_topic / generate_class_notes
     are imported by name into plan_routes, so they must be patched on plan_routes; structure_curriculum
-    is called inside build.py (so patch build.structure_curriculum and let the real build_plan run);
+    and generate_all_class_notes are called inside build.py (so patch them on build and let the real
+    build_plan run) — the eager one is what /plan/build now spends its calls on, and without it every
+    test that builds a plan would reach for the network. The lazy plan_routes.generate_class_notes
+    fake only fires on ?regenerate=true and on paths the eager step didn't fill;
     student_turn / generate_targeted_questions / explain_answer are called inside teaching.py
     (patch teaching.*). The question generator records every history it's handed so we can assert
     cross-class dedup, and every argument it got in GENERATOR_CALLS so we can assert on the context
@@ -107,6 +115,12 @@ def _stub_llm():
             covered = ", ".join(memory.covered_concepts) or "none"
             return f"# {cls.title}\nCovered so far: {covered}\nA primer."
 
+        async def fake_all_notes(path, material=None, **kwargs):
+            for c in path.classes:
+                c.teacher_notes = f"# {c.title}\nA primer."
+                c.notes_generated = True
+            return []
+
         async def fake_student_turn(transcript, utterance):
             from app.schemas import Segment as Segment_
             nid = max((s.id for s in transcript), default=-1) + 1
@@ -146,6 +160,7 @@ def _stub_llm():
 
         monkeypatch.setattr(plan_routes, "scope_topic", fake_scope)
         monkeypatch.setattr(build, "structure_curriculum", fake_structure)
+        monkeypatch.setattr(build, "generate_all_class_notes", fake_all_notes)
         monkeypatch.setattr(plan_routes, "generate_class_notes", fake_notes)
         monkeypatch.setattr(teaching, "student_turn", fake_student_turn)
         monkeypatch.setattr(teaching, "generate_targeted_questions", fake_generate)
@@ -172,18 +187,21 @@ def test_full_workflow_two_classes(monkeypatch):
     path = r.json()
     pid = path["path_id"]
     assert [c["class_id"] for c in path["classes"]] == ["c1", "c2"]
-    assert all(c["notes_generated"] is False for c in path["classes"])
+    # Material for EVERY class, written during the build — the learner never waits for a primer,
+    # and each was written knowing what the others cover.
+    assert all(c["notes_generated"] is True and c["teacher_notes"] for c in path["classes"])
 
     # 3. GET finds the saved plan
     assert client.get(f"/plan/{pid}").json()["confirmed_topic"] == "Mechanics"
     assert any(item["path_id"] == pid for item in client.get("/plan").json())
     assert client.get(f"/plan/{pid}/memory").json()["path_id"] == pid
 
-    # 4. notes for c1 (no earlier classes -> "none" in the primer)
+    # 4. notes for c1 -> serves back what the build already wrote, without spending a call
+    built_c1 = next(c for c in path["classes"] if c["class_id"] == "c1")["teacher_notes"]
     r = client.post(f"/plan/{pid}/class/c1/notes")
     assert r.status_code == 200
     assert r.json()["notes_generated"] is True
-    assert "Covered so far: none" in r.json()["teacher_notes"]
+    assert r.json()["teacher_notes"] == built_c1
 
     # 5a. confident turn -> no question
     r = client.post(f"/plan/{pid}/class/c1/teach/turn",
@@ -204,8 +222,9 @@ def test_full_workflow_two_classes(monkeypatch):
     assert q1 in mem["asked_questions"]
     assert q1 in mem["struggled"] and q1 not in mem["understood"]
 
-    # 7. notes for c2 -> primer sees c1 as covered (cross-class context flows into notes)
-    r = client.post(f"/plan/{pid}/class/c2/notes")
+    # 7. rewriting c2's primer now that c1 has actually been taught -> it sees c1 as covered
+    #    (cross-class MEMORY, which only the lazy route can have: at build time nothing was taught)
+    r = client.post(f"/plan/{pid}/class/c2/notes", params={"regenerate": "true"})
     assert "Forces" in r.json()["teacher_notes"]
 
     # 8. hedged turn in c2 -> question fires, and c1's question was handed in as history
@@ -746,14 +765,23 @@ def test_the_gpu_question_is_the_fallback_when_the_generator_writes_nothing(monk
 
 
 def test_notes_are_generated_once_and_reused(monkeypatch):
-    """The expensive call in the plan surface. Re-entering a class must not rewrite its primer."""
+    """The expensive call in the plan surface. Re-entering a class must not rewrite its primer.
+
+    Built here with the eager step failing outright, which is both the class-that-failed case and
+    what a path stored before /plan/build wrote notes looks like — the only two ways the lazy
+    route is reached at all now.
+    """
     _stub_llm()(monkeypatch)
     calls: list[str] = []
+
+    async def no_eager_notes(path, material=None, **kwargs):
+        return [c.class_id for c in path.classes]
 
     async def counting_notes(path, cls, memory):
         calls.append(cls.class_id)
         return f"# {cls.title}\nprimer {len(calls)}"
 
+    monkeypatch.setattr(build, "generate_all_class_notes", no_eager_notes)
     monkeypatch.setattr(plan_routes, "generate_class_notes", counting_notes)
 
     pid = client.post("/plan/build", json={
@@ -768,3 +796,172 @@ def test_notes_are_generated_once_and_reused(monkeypatch):
     forced = client.post(f"/plan/{pid}/class/c1/notes?regenerate=true").json()
     assert calls == ["c1", "c1"]
     assert forced["teacher_notes"] != first["teacher_notes"]
+
+
+# --------------------------------------------------------------------------- #
+# Material for every class, written at build time against the whole outline.
+# The bug this replaced: each primer was written alone, knowing only the TITLES
+# of earlier classes, so class 3 re-taught class 1 and class 1 wandered into
+# class 4's material.
+# --------------------------------------------------------------------------- #
+
+def _stub_three_classes(monkeypatch):
+    """A three-class course, so the middle one has both an earlier and a later sibling."""
+    async def fake_structure(confirmed_topic, num_classes, material):
+        return (
+            [
+                ClassUnit(class_id="c1", title="Forces", objective="Define force.", objectives=[
+                    ClassObjective(id="o1", text="Explain what a force does to motion."),
+                ]),
+                ClassUnit(class_id="c2", title="Newton's Laws", objective="State the laws.",
+                          prerequisites=["c1"], objectives=[
+                              ClassObjective(id="o1", text="Explain why forces come in pairs."),
+                              ClassObjective(id="o2", text="Explain how mass resists acceleration."),
+                          ]),
+                ClassUnit(class_id="c3", title="Energy", objective="Define energy.",
+                          prerequisites=["c2"], objectives=[
+                              ClassObjective(id="o1", text="Explain how work transfers energy."),
+                          ]),
+            ],
+            ["c1", "c2", "c3"],
+        )
+
+    monkeypatch.setattr(build, "structure_curriculum", fake_structure)
+    monkeypatch.setattr(build, "generate_all_class_notes", _REAL_ALL_NOTES)
+
+
+def _fake_generator(monkeypatch, fail_titles: tuple[str, ...] = ()):
+    """Record what each notes call was actually handed, running the REAL fan-out against a fake
+    model. Returns the list of user messages — asserting on those is the only way to check that a
+    class was told what its siblings cover."""
+    seen: list[str] = []
+
+    class _Resp:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+    class _LLM:
+        async def ainvoke(self, messages):
+            user = messages[1]["content"]
+            seen.append(user)
+            header = user.split("\n\n")[0]
+            if any(f'"{title}"' in header for title in fail_titles):
+                raise RuntimeError("model unavailable")
+            return _Resp(f"# notes\n{header.splitlines()[1]}")
+
+    monkeypatch.setattr(build, "generator_llm", lambda temperature=0.3: _LLM())
+    return seen
+
+
+def _message_for(seen: list[str], title: str) -> str:
+    return next(m for m in seen if f'"{title}"' in m.split("\n\n")[0])
+
+
+def _build_three(material: str | None = None) -> dict:
+    r = client.post("/plan/build", json={
+        "original_input": "mechanics", "confirmed_topic": "Mechanics", "num_classes": 3,
+        "material_text": material,
+    })
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_build_writes_the_material_for_every_class(monkeypatch):
+    """One build, every class's material. The learner never waits on a primer mid-course."""
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    seen = _fake_generator(monkeypatch)
+
+    path = _build_three()
+
+    assert len(seen) == 3, "one call per class"
+    assert all(c["notes_generated"] and c["teacher_notes"].strip() for c in path["classes"])
+    assert len({c["teacher_notes"] for c in path["classes"]}) == 3, "each class got its own"
+    # Persisted, not just returned.
+    stored = client.get(f"/plan/{path['path_id']}").json()
+    assert [c["teacher_notes"] for c in stored["classes"]] == \
+           [c["teacher_notes"] for c in path["classes"]]
+
+
+def test_each_class_is_told_what_the_others_cover(monkeypatch):
+    """The whole point of building the material together: a class can only avoid repeating its
+    siblings if it is told what they own — their objectives, not just their titles."""
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    seen = _fake_generator(monkeypatch)
+
+    _build_three()
+    middle = _message_for(seen, "Newton's Laws")
+    earlier, later = middle.split("LATER CLASSES")[0], middle.split("LATER CLASSES")[1]
+
+    # Its own scope, in full.
+    assert "Explain why forces come in pairs." in middle.split("EARLIER CLASSES")[0]
+    assert "Explain how mass resists acceleration." in middle.split("EARLIER CLASSES")[0]
+    # What came before — down to the objective, so "Forces was covered" isn't left to guesswork.
+    assert "Forces" in earlier and "Explain what a force does to motion." in earlier
+    # And what comes after, so it stops short instead of pre-empting c3.
+    assert "Energy" in later and "Explain how work transfers energy." in later
+
+    # The ends of the course say so explicitly rather than silently omitting a side.
+    assert "EARLIER CLASSES (already taught — do not re-teach): (none)" \
+        in _message_for(seen, "Forces")
+    assert "LATER CLASSES (taught after this one — do not pre-empt): (none)" \
+        in _message_for(seen, "Energy")
+
+
+def test_notes_are_written_from_the_full_material_not_the_stored_summary(monkeypatch):
+    """Build time is the only moment the whole upload is in hand — only a 500-char prefix is
+    persisted on the path, so a primer written later can never see past it."""
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    seen = _fake_generator(monkeypatch)
+
+    material = "Newton's third law. " * 30 + "DEEP: momentum is conserved in every collision."
+    assert len(material) > 600
+    path = _build_three(material)
+
+    assert all("DEEP: momentum is conserved" in message for message in seen)
+    assert "DEEP: momentum is conserved" not in (path["source_material_summary"] or "")
+
+
+def test_one_failed_class_costs_neither_the_course_nor_its_siblings(monkeypatch):
+    """A rate-limited notes tier must not throw away the course the learner just agreed to."""
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    _fake_generator(monkeypatch, fail_titles=("Newton's Laws",))
+
+    path = _build_three()
+    by_id = {c["class_id"]: c for c in path["classes"]}
+    assert by_id["c1"]["notes_generated"] and by_id["c3"]["notes_generated"]
+    assert by_id["c2"]["notes_generated"] is False and by_id["c2"]["teacher_notes"] == ""
+
+    # ...and the class that missed out is filled the moment the learner opens it.
+    r = client.post(f"/plan/{path['path_id']}/class/c2/notes")
+    assert r.status_code == 200
+    assert r.json()["notes_generated"] is True and r.json()["teacher_notes"].strip()
+
+
+def test_a_total_notes_failure_still_returns_the_course(monkeypatch):
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    _fake_generator(monkeypatch, fail_titles=("Forces", "Newton's Laws", "Energy"))
+
+    path = _build_three()
+    assert [c["class_id"] for c in path["classes"]] == ["c1", "c2", "c3"]
+    assert not any(c["notes_generated"] for c in path["classes"])
+
+
+def test_lazy_notes_still_serves_a_path_built_before_this(monkeypatch):
+    """Paths stored before the build wrote material have notes_generated=False forever; the /notes
+    route is what keeps them usable."""
+    _stub_llm()(monkeypatch)
+    legacy = GrowthPath(
+        path_id="gp-legacy", original_input="mechanics", confirmed_topic="Mechanics",
+        total_classes=1, recommended_order=["c1"],
+        classes=[ClassUnit(class_id="c1", title="Forces", objective="Define force.")],
+    )
+    asyncio.run(store.save_path(legacy))
+
+    r = client.post("/plan/gp-legacy/class/c1/notes")
+    assert r.status_code == 200
+    assert r.json()["notes_generated"] is True and r.json()["teacher_notes"].strip()

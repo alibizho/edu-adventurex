@@ -1,11 +1,12 @@
 """Learning-plan HTTP surface. The new "learn by teaching" front of the experience:
 
     POST /plan/scope                           confirm / narrow the topic
-    POST /plan/build                           build the ~5-class plan (no notes yet)
+    POST /plan/build                           build the ~5-class plan, teacher's notes and all
     GET  /plan                                 every stored plan (the UI's path picker)
     GET  /plan/{path_id}                       fetch the plan
     GET  /plan/{path_id}/memory                cross-class memory + per-class progress
-    POST /plan/{path_id}/class/{cid}/notes     generate this class's teacher's notes (Markdown)
+    POST /plan/{path_id}/class/{cid}/notes     (re)write this class's teacher's notes — normally
+                                               already written by /plan/build
     POST /plan/{path_id}/class/{cid}/teach/turn teach a turn; a question fires only when unconfident
     POST /plan/{path_id}/class/{cid}/teach/audio-turn  same, from recorded speech via the ml-service
     POST /plan/{path_id}/class/{cid}/end        "End class"; folds the class into cross-class memory
@@ -76,7 +77,15 @@ async def plan_scope(req: ScopeRequest) -> TopicScope:
 
 @router.post("/build", response_model=GrowthPath)
 async def plan_build(req: BuildPlanRequest) -> GrowthPath:
-    """Build and store the teaching plan (classes present; teacher's notes generated lazily)."""
+    """Build and store the teaching plan: the classes, plus every class's teacher's notes, written
+    in parallel with the whole outline in view so no two classes teach the same thing.
+
+    Slower than it used to be — this is N+1 model calls, not one — and deliberately so: material
+    written per class on demand had no way to know what the other classes covered.
+
+    A class whose notes call failed comes back with `notes_generated: false` and is filled by the
+    /notes route when the learner opens it. The course itself is never lost to that.
+    """
     try:
         path = await build_plan(req)
     except CurriculumGenerationError as exc:
@@ -106,13 +115,16 @@ async def plan_memory(path_id: str) -> PathMemory:
 
 @router.post("/{path_id}/class/{class_id}/notes", response_model=ClassUnit)
 async def class_notes(path_id: str, class_id: str, regenerate: bool = False) -> ClassUnit:
-    """Generate the teacher's notes (Markdown) for this class, memory-aware so it doesn't repeat
-    earlier classes. Persisted onto the plan and returned.
+    """Write the teacher's notes (Markdown) for this class, memory-aware so it doesn't repeat what
+    the learner has already taught. Persisted onto the plan and returned.
 
-    Already-generated notes are returned as-is: this is the expensive call in the whole plan
-    surface, and re-entering a class shouldn't rewrite (and re-bill) its primer. Pass
-    `?regenerate=true` to rebuild deliberately — worth doing once cross-class memory has moved on
-    and the primer should stop re-teaching what the learner has since covered.
+    /plan/build normally writes these already, so this route is the backfill and survives for three
+    reasons: paths built before notes were eager, `?regenerate=true` once cross-class memory has
+    moved on and the primer should stop re-teaching what the learner has since covered, and the
+    class whose eager call failed.
+
+    Already-generated notes are returned as-is — re-entering a class shouldn't rewrite (and
+    re-bill) its primer.
     """
     path = await _load_path(path_id)
     cls = _find_class(path, class_id)

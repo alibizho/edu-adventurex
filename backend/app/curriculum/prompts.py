@@ -88,7 +88,15 @@ Requirements:
 - You MAY include AT MOST ONE diagram, as a fenced ```mermaid code block, only when a structure,
   flow, or relationship genuinely makes the idea clearer. Make the mermaid syntax valid.
 - NEVER include images, image links, HTML <img>, or base64 — text and mermaid only.
-- Do NOT re-explain concepts already covered in earlier classes (they are listed for you); you
-  may briefly reference them to connect ideas.
 - Output ONLY the Markdown body — no preamble, no surrounding code fences.
+
+Scope — you are writing ONE class inside a course, and you are shown the whole outline:
+- Teach ONLY the objectives listed for THIS class, and cover every one of them: the learner is
+  graded on explaining each out loud. Nothing outside them belongs in these notes.
+- EARLIER CLASSES have already been taught. Do NOT re-explain them — a clause connecting back to
+  one is fine, a paragraph is not.
+- LATER CLASSES are another class's job. Do NOT pre-empt them: if an idea belongs to a later
+  class's objectives, leave it out, or name it once as something coming up.
+- When an idea could sit in two classes it belongs to the one whose objectives name it — not to
+  this one by default.
 """

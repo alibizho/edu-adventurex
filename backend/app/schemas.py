@@ -192,14 +192,15 @@ class ClassObjective(BaseModel):
 
 class ClassUnit(BaseModel):
     """One class = one topic the learner must understand by teaching it. No subtopics — a class is
-    the unit of teaching. Teacher's notes are generated lazily, right before the class starts."""
+    the unit of teaching. Teacher's notes are written up-front at /plan/build, against the whole
+    outline, so no two classes cover the same ground."""
     class_id: str
     title: str                          # "Newton's Laws of Motion" — the class IS the topic
     objective: str                      # one-sentence learning goal
     objectives: list[ClassObjective] = Field(default_factory=list)  # the checkable breakdown
     difficulty: str = "beginner"        # beginner | intermediate | advanced
     prerequisites: list[str] = Field(default_factory=list)  # class_ids that should come first
-    teacher_notes: str = ""             # Markdown primer, generated lazily (may embed ```mermaid)
+    teacher_notes: str = ""             # Markdown primer, written at build (may embed ```mermaid)
     notes_generated: bool = False
 
     def checklist(self) -> list[ClassObjective]:

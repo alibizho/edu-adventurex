@@ -63,6 +63,15 @@ class Settings(BaseSettings):
 
     # --- Learning plan (curriculum). Default number of classes when scope/build don't decide one. ---
     default_classes: int = 5
+    # Teacher's notes are written up-front at /plan/build, one call per class fired together so
+    # each can see the whole outline and stay off its siblings' ground. Cap the fan-out: eight
+    # simultaneous calls on one key trips per-key concurrency limits, and the backoff from the
+    # resulting 429s costs more than the wave it saved.
+    notes_concurrency: int = 4
+    # Per-class budget. /plan/build blocks on these and the browser allows 180s for the whole
+    # build, so one stuck connection must degrade that class to lazy generation rather than hold
+    # the entire course hostage.
+    notes_timeout: float = 60.0
 
     # --- Objective mastery. How many new utterances to accumulate before judging which class
     #     objectives they covered: one verifier call per check, so this is the cost/latency dial.
