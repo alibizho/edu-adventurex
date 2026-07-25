@@ -17,11 +17,13 @@ from sqlalchemy import text
 from app.schemas import (
     Anomaly,
     ChunkAnalysis,
+    ClassProgressRecord,
     CurriculumUpdate,
     QuestionDelta,
     RunResult,
     Score,
     Segment,
+    SpeechProsody,
     StudentQuestion,
     TargetedQuestion,
     WordScore,
@@ -78,6 +80,13 @@ async def main() -> None:
             curriculum_update=CurriculumUpdate(
                 added_concepts=["Calvin cycle"]
             ),
+            # Set by fusion.fuse_prosody. These had no columns and were silently dropped, so the
+            # GPU-vs-browser comparison gpu_confidence exists for was impossible against Postgres.
+            prosody=SpeechProsody(
+                speech_ms=4200, total_ms=6000, pause_count=3,
+                longest_pause_ms=900, mean_level=0.031, peak_level=0.184,
+            ),
+            gpu_confidence=0.72,
         ))
         # re-analyze chunk 0 -> should UPDATE in place, not duplicate
         await st.append_analysis(sid, ChunkAnalysis(chunk_id=0, text="Plants use light.", confidence=0.55))
@@ -94,6 +103,27 @@ async def main() -> None:
             an[1].curriculum_update is not None
             and an[1].curriculum_update.added_concepts == ["Calvin cycle"],
             "curriculum update JSONB round-trip",
+        )
+        check(
+            an[1].prosody is not None
+            and an[1].prosody.pause_count == 3
+            and an[1].prosody.longest_pause_ms == 900
+            and abs(an[1].prosody.peak_level - 0.184) < 1e-6,
+            "browser prosody JSONB round-trip",
+        )
+        check(an[1].gpu_confidence == 0.72, "pre-fusion gpu_confidence round-trip")
+        # The upsert must carry them too, or a re-analyzed chunk keeps stale prosody.
+        await st.append_analysis(sid, ChunkAnalysis(
+            chunk_id=1, text="They make sugar.", confidence=0.4,
+            prosody=SpeechProsody(speech_ms=1000, total_ms=1200, pause_count=0,
+                                  longest_pause_ms=0, mean_level=0.05, peak_level=0.2),
+            gpu_confidence=0.31,
+        ))
+        an = await st.get_analyses(sid)
+        check(
+            an[1].prosody is not None and an[1].prosody.pause_count == 0
+            and an[1].gpu_confidence == 0.31,
+            "re-analyzed chunk updates prosody + gpu_confidence in place",
         )
 
         # set_analyses replaces the whole set
@@ -138,6 +168,44 @@ async def main() -> None:
         check(answered[1].answer == "Blue and red light.", "answer persisted")
         check(answered[1].answered_at is not None, "answered_at timestamp set")
         check(await st.covered_chunk_ids(sid) == {5}, "answered chunk now counts as covered")
+
+        # -- verifier-gated conversation: answer_key + parent_id survive, and the thread is walked --
+        await st.record_questions(sid, [
+            TargetedQuestion(id=2, chunk_id=6, text="What does a routing table hold?",
+                             answer_key="Destination prefixes mapped to a next hop."),
+            TargetedQuestion(id=3, chunk_id=7, text="And what picks the row?", parent_id=2),
+        ])
+        threaded = {e.question.id: e for e in await st.get_history(sid)}
+        check(
+            threaded[2].question.answer_key == "Destination prefixes mapped to a next hop.",
+            "answer_key round-trips (the verifier has nothing to grade against without it)",
+        )
+        check(threaded[3].question.parent_id == 2, "parent_id round-trips")
+        check(await st.find_question(sid, 2) is not None, "find_question locates a live question")
+        check(await st.find_question(sid, 404) is None, "find_question returns None for unknown id")
+        check(await st.thread_turns(sid, 3) == 0, "thread starts with no answered turns")
+        await st.record_answer(sid, 2, "it maps destinations to a next hop")
+        check(await st.thread_turns(sid, 3) == 1, "thread_turns counts the parent's answer")
+        await st.record_answer(sid, 3, "the longest prefix match")
+        check(await st.thread_turns(sid, 2) == 2, "thread_turns counts the whole chain either way")
+
+        # -- path memory: the struggle ledger rides inside the PathMemory JSONB blob --
+        pid = f"path-{sid}"
+        fresh = await st.get_memory(pid)
+        check(fresh.path_id == pid and fresh.class_progress == {}, "get_memory defaults for a new path")
+        fresh.class_progress["c1"] = ClassProgressRecord(
+            turn_count=3,
+            struggle_scores={"routing table": 1.4, "hop": 0.5},
+            focus_target="routing table",
+            covered_objectives=["o1"],
+        )
+        await st.update_memory(pid, fresh)
+        reloaded = await st.get_memory(pid)
+        progress = reloaded.class_progress["c1"]
+        check(progress.struggle_scores == {"routing table": 1.4, "hop": 0.5},
+              "struggle ledger round-trips inside the PathMemory blob")
+        check(progress.focus_target == "routing table", "focus_target round-trips")
+        check(progress.covered_objectives == ["o1"], "covered objectives still round-trip")
 
         print("\nALL DB ROUND-TRIP CHECKS PASSED")
     finally:

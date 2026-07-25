@@ -53,15 +53,29 @@ def _covers(*objective_ids: str):
     return fake
 
 
+# Every argument the question generator was called with, in order. Module-level rather than
+# returned so the many tests that ignore `_stub_llm`'s return value can still reach it; `_install`
+# clears it, so each test sees only its own calls.
+GENERATOR_CALLS: list[dict] = []
+
+# Same, for the turns where the student stops asking and explains.
+EXPLAIN_CALLS: list[dict] = []
+
+
 def _stub_llm():
     """Stub the LLM-touching functions with deterministic fakes. scope_topic / generate_class_notes
     are imported by name into plan_routes, so they must be patched on plan_routes; structure_curriculum
     is called inside build.py (so patch build.structure_curriculum and let the real build_plan run);
-    student_turn / generate_targeted_questions are called inside teaching.py (patch teaching.*).
-    The question generator records every history it's handed so we can assert cross-class dedup."""
+    student_turn / generate_targeted_questions / explain_answer are called inside teaching.py
+    (patch teaching.*). The question generator records every history it's handed so we can assert
+    cross-class dedup, and every argument it got in GENERATOR_CALLS so we can assert on the context
+    a question was written from — which is the difference between a question about the topic and a
+    question about whichever word happened to be flagged."""
 
     def _install(monkeypatch):
         seen_histories: list[list[str]] = []
+        GENERATOR_CALLS.clear()
+        EXPLAIN_CALLS.clear()
 
         async def fake_scope(req):
             return TopicScope(
@@ -101,15 +115,41 @@ def _stub_llm():
                 new_segment=Segment_(id=nid, idx=len(transcript), text=utterance),
             )
 
-        async def fake_generate(chunks, history, start_id=0, topic=None):
+        async def fake_generate(chunks, history, start_id=0, topic=None, transcript="",
+                                focus_target="", parent_id=None, objectives=None):
             seen_histories.append([e.question.text for e in history])
-            return [TargetedQuestion(id=start_id, chunk_id=chunks[0].chunk_id, text=f"probe:{chunks[0].text[:8]}")]
+            GENERATOR_CALLS.append({
+                "topic": topic,
+                "transcript": transcript,
+                "focus_target": focus_target,
+                "objectives": list(objectives or []),
+                "chunks": [c.text for c in chunks],
+            })
+            return [TargetedQuestion(
+                id=start_id,
+                chunk_id=chunks[0].chunk_id,
+                text=f"probe:{chunks[0].text[:8]}",
+                # A real generated question always carries a key; without one the conversation
+                # can't grade an answer and retires the question after a single press.
+                answer_key=f"key:{chunks[0].text[:8]}",
+                parent_id=parent_id,
+            )]
+
+        async def fake_explain(question, topic="", transcript="", objectives=None):
+            EXPLAIN_CALLS.append({
+                "question": question.text,
+                "answer_key": question.answer_key,
+                "topic": topic,
+                "objectives": list(objectives or []),
+            })
+            return f"explained:{question.text}"
 
         monkeypatch.setattr(plan_routes, "scope_topic", fake_scope)
         monkeypatch.setattr(build, "structure_curriculum", fake_structure)
         monkeypatch.setattr(plan_routes, "generate_class_notes", fake_notes)
         monkeypatch.setattr(teaching, "student_turn", fake_student_turn)
         monkeypatch.setattr(teaching, "generate_targeted_questions", fake_generate)
+        monkeypatch.setattr(teaching, "explain_answer", fake_explain)
         return seen_histories
 
     return _install
@@ -213,7 +253,14 @@ def test_scope_broad_returns_suggestions(monkeypatch):
     assert all("topic" in s and "rationale" in s and "suggested_classes" in s for s in body["suggestions"])
 
 
-def test_audio_turn_uses_gpu_question_and_persists_curriculum_update(monkeypatch):
+def test_audio_turn_writes_its_own_question_from_the_gpu_signal(monkeypatch):
+    """The GPU's anomaly still decides WHETHER to ask; it no longer decides WHAT to ask.
+
+    Its question is written from `localized_target` — one word chosen by acoustic score — so
+    relaying it verbatim produced questions about a stumble rather than a subject. Now the anomaly
+    is the trigger and its target is a hint, and the question itself comes from the generator that
+    can see the class goals and the transcript.
+    """
     _stub_llm()(monkeypatch)
     captured: dict[str, object] = {}
 
@@ -266,9 +313,20 @@ def test_audio_turn_uses_gpu_question_and_persists_curriculum_update(monkeypatch
     assert "Define force." in str(captured["curriculum_context"])
     assert "A primer." in str(captured["curriculum_context"])
     assert "Forces" in captured["key_concepts"]
+    # Confidence 0.68 is above the confusion threshold and the sentence carries no hedge markers,
+    # so the GPU's anomaly is the only reason anything was asked at all.
     assert body["asked"] is True
-    assert body["question"]["text"] == "Why is decoherence not exactly the same as collapse?"
+    assert body["question"]["text"] != "Why is decoherence not exactly the same as collapse?", \
+        "the GPU's one-word question must not be relayed verbatim"
+    assert body["question"]["text"].startswith("probe:")
     assert body["student_reply"] == body["question"]["text"]
+
+    call = GENERATOR_CALLS[-1]
+    assert call["focus_target"] == "decoherence", "the GPU target is passed through as a hint"
+    assert "Explain what a force does to motion." in call["objectives"], \
+        "the class checklist grounds the question in what this class is for"
+    assert "Measurement can also lead us to decoherence." in call["transcript"]
+
     assert body["analysis"]["curriculum_update"]["added_concepts"] == [
         "environmental decoherence"
     ]
@@ -386,6 +444,28 @@ def _teach_chunks(pid: str, class_id: str, texts: list[str], monkeypatch):
         assert r.status_code == 200, r.text
 
 
+def _stub_gpu(monkeypatch, texts: list[str], confidence: float = 0.2):
+    """Stub the ml-service so each posted chunk transcribes to the next text in `texts`."""
+    queue = list(texts)
+
+    async def fake_analyze(audio_bytes, **kwargs):
+        return ChunkAnalysis(
+            chunk_id=kwargs["chunk_id"], text=queue.pop(0), confidence=confidence
+        ), False
+
+    monkeypatch.setattr(plan_routes.client, "analyze_audio_with_status", fake_analyze)
+
+
+def _post_audio(pid: str, chunk_id: int, class_id: str = "c1", **extra):
+    r = client.post(
+        f"/plan/{pid}/class/{class_id}/teach/audio-turn",
+        data={"chunk_id": chunk_id, "history": "[]", "silent": "true", **extra},
+        files={"audio": ("chunk.wav", b"RIFFfakewavdata", "audio/wav")},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 def _build_with_notes(class_id: str = "c1") -> str:
     pid = client.post("/plan/build", json={
         "original_input": "mechanics", "confirmed_topic": "Mechanics", "num_classes": 2,
@@ -493,6 +573,176 @@ def test_a_student_asks_about_an_objective_that_is_still_open(monkeypatch):
     probes = [q["question"] for q in questions if q["question"]["anomaly_type"] == "uncovered_goal"]
     assert 0 < len(probes) < 5, "the room steers periodically, not on every single utterance"
     assert len({p["text"] for p in probes}) == len(probes), "no repeated nudges"
+
+
+def test_one_chunk_is_enough_to_credit_an_objective(monkeypatch):
+    """Coverage used to wait for three new segments before it was even judged. Chunks are cut at
+    natural pauses and uploaded one at a time, so that was 15-30s of talking before a checkmark
+    could appear — the lag the CLASS GOALS panel was showing."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers("o1"))
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    pid = _build_with_notes()
+    _teach_chunks(pid, "c1", ["a force changes motion"], monkeypatch)
+
+    progress = client.get(f"/plan/{pid}/memory").json()["class_progress"]["c1"]
+    assert progress["covered_objectives"] == ["o1"]
+    assert progress["readiness"] == 50
+
+
+def test_coverage_is_judged_over_a_window_not_just_the_newest_chunk(monkeypatch):
+    """An explanation that straddles two chunks has to still be creditable. Judging only the
+    unjudged tail meant the judge saw half a sentence and could never credit the whole thought."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+    seen: list[str] = []
+
+    async def recording_judge(cls, open_objectives, transcript):
+        seen.append(transcript)
+        return {}
+
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", recording_judge)
+
+    pid = _build_with_notes()
+    _teach_chunks(pid, "c1", ["a force changes", "how something moves"], monkeypatch)
+
+    assert "a force changes" in seen[-1] and "how something moves" in seen[-1], \
+        "the judge sees a window of recent speech, not only what arrived since the last check"
+
+
+# --------------------------------------------------------------------------- #
+# the student teaches when the learner is stuck
+# --------------------------------------------------------------------------- #
+
+def _ask_one_question(monkeypatch, pid: str, learner_says: list[str]) -> dict:
+    """Fire one confused chunk so a student raises a hand, and return that question."""
+    _stub_gpu(monkeypatch, learner_says)
+    asked = _post_audio(pid, chunk_id=0)
+    assert asked["asked"] is True, "a hedged chunk must raise a hand for the rest of this to mean anything"
+    return asked["question"]
+
+
+def test_saying_i_dont_know_gets_the_answer_instead_of_another_question(monkeypatch):
+    """The reported behaviour: admitting you're lost earned you another question. A learner who
+    has just said they don't know cannot be probed into knowing — they have to be told."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers())
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    pid = _build_with_notes()
+    question = _ask_one_question(
+        monkeypatch, pid, ["um, i think force is maybe a push?", "i don't know"]
+    )
+    answered = _post_audio(pid, chunk_id=1, answering_question_id=question["id"], silent="false")
+
+    assert answered["student_reply"] == f"explained:{question['text']}"
+    assert answered["asked"] is False, "no follow-up question — they asked for help"
+    assert answered["conversation_over"] is True
+    assert EXPLAIN_CALLS[-1]["answer_key"] == question["answer_key"], \
+        "the explanation is grounded in the question's own answer key"
+    assert "Explain what a force does to motion." in EXPLAIN_CALLS[-1]["objectives"]
+
+    progress = client.get(f"/plan/{pid}/memory").json()["class_progress"]["c1"]
+    assert progress["explanations_given"] == 1
+
+
+def test_wrong_answers_are_pressed_then_explained_never_abandoned(monkeypatch):
+    """The old terminal state was "LET'S COME BACK TO IT", which sounds like patience and is
+    actually abandonment. Press while there are tries left, then answer the question."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers())
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    async def always_wrong(answer, question):
+        return False, False
+
+    monkeypatch.setattr(teaching, "grade_answer", always_wrong)
+
+    pid = _build_with_notes()
+    question = _ask_one_question(monkeypatch, pid, ["um, i think force is maybe a push?"])
+
+    replies, question_id = [], question["id"]
+    for attempt in range(3):
+        _stub_gpu(monkeypatch, [f"a force is something that pushes on stuff, attempt {attempt}"])
+        turn = _post_audio(
+            pid, chunk_id=attempt + 1, answering_question_id=question_id, silent="false"
+        )
+        replies.append(turn)
+        if turn["question"]:
+            question_id = turn["question"]["id"]
+
+    assert [t["asked"] for t in replies] == [True, True, False], \
+        "two presses on the same concept, then the answer"
+    assert replies[-1]["student_reply"].startswith("explained:")
+    assert replies[-1]["conversation_over"] is True
+    assert not any("COME BACK TO IT" in t["student_reply"] for t in replies)
+
+
+def test_saying_i_dont_know_into_the_room_teaches_instead_of_asking(monkeypatch):
+    """Not only face to face. A teacher who stalls mid-lesson gets the same help."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers())
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    pid = _build_with_notes()
+    _stub_gpu(monkeypatch, ["honestly i have no idea how to explain this"])
+    body = _post_audio(pid, chunk_id=0)
+
+    assert body["asked"] is False and body["question"] is None
+    assert body["student_reply"].startswith("explained:")
+    assert "Explain what a force does to motion." in EXPLAIN_CALLS[-1]["question"], \
+        "it teaches the objective they were stuck on"
+
+
+def test_being_told_the_answer_makes_the_class_guided(monkeypatch):
+    """`completion_mode` is the record of HOW the class was passed. Working it out and being told
+    are not the same thing, and the button that ends the class doesn't get to decide which it was.
+    The question also stays in `struggled`, so a later class is free to come back to it."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers())
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    pid = _build_with_notes()
+    question = _ask_one_question(
+        monkeypatch, pid, ["um, i think force is maybe a push?", "i dunno, you tell me"]
+    )
+    _post_audio(pid, chunk_id=1, answering_question_id=question["id"], silent="false")
+
+    memory = client.post(f"/plan/{pid}/class/c1/end", json={"completion_mode": "self-teaching"}).json()
+    assert memory["class_progress"]["c1"]["completion_mode"] == "guided-explanation"
+    assert question["text"] in memory["struggled"], "being told is not understanding"
+    assert question["text"] not in memory["understood"]
+
+
+def test_the_gpu_question_is_the_fallback_when_the_generator_writes_nothing(monkeypatch):
+    """Demoted, not deleted. If our generator is unreachable, a one-word question beats silence."""
+    _stub_llm()(monkeypatch)
+    monkeypatch.setattr(teaching.mastery, "judge_coverage", _covers())
+    monkeypatch.setattr(teaching.mastery, "goal_probe", _never_probe)
+
+    async def writes_nothing(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(teaching, "generate_targeted_questions", writes_nothing)
+
+    async def fake_analyze(audio_bytes, **kwargs):
+        return ChunkAnalysis(
+            chunk_id=kwargs["chunk_id"],
+            text="Measurement can also lead us to decoherence.",
+            confidence=0.68,
+            student_question=StudentQuestion(
+                question_text="Why is decoherence not exactly the same as collapse?",
+                target_concept="decoherence",
+                anomaly_type="beyond",
+            ),
+        ), False
+
+    monkeypatch.setattr(plan_routes.client, "analyze_audio_with_status", fake_analyze)
+
+    pid = _build_with_notes()
+    body = _post_audio(pid, chunk_id=0)
+    assert body["question"]["text"] == "Why is decoherence not exactly the same as collapse?"
 
 
 def test_notes_are_generated_once_and_reused(monkeypatch):

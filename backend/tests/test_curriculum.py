@@ -97,11 +97,13 @@ def _stub_llm(monkeypatch):
             new_segment=Segment(id=nid, idx=len(transcript), text=utterance),
         )
 
-    async def fake_generate(chunks, history, start_id=0, topic=None):
+    async def fake_generate(chunks, history, start_id=0, topic=None, transcript="",
+                            focus_target="", parent_id=None, objectives=None):
         seen_histories.append([e.question.text for e in history])
         return [
             TargetedQuestion(
-                id=start_id, chunk_id=chunks[0].chunk_id, text=f"probe:{chunks[0].text[:16]}"
+                id=start_id, chunk_id=chunks[0].chunk_id, text=f"probe:{chunks[0].text[:16]}",
+                answer_key=f"key:{chunks[0].text[:16]}", parent_id=parent_id,
             )
         ]
 
