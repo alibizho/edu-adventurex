@@ -37,7 +37,10 @@
   .growth-track {
     position: relative;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* One row whatever the class count. Hardcoded at 4 columns, a 5-class course dropped its last
+       class onto a second row with the connecting line still spanning only the first. */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 20px;
     margin-top: 52px;
   }
@@ -50,7 +53,25 @@
     height: 4px;
     background: var(--ink);
   }
-  .growth-stop { position: relative; z-index: 1; display: grid; justify-items: center; gap: 12px; text-align: center; }
+  /* Each stop is a button — the summary is where the next class gets chosen, so the timeline is
+     the navigation, not a picture of one. Button chrome is stripped back to the plain mark. */
+  .growth-stop {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: center;
+    cursor: pointer;
+  }
+  .growth-stop:hover b { transform: translateY(-3px); }
+  .growth-stop b { transition: transform .12s steps(2); }
+  .growth-stop:focus-visible { outline: 4px solid var(--ink); outline-offset: 6px; }
+  @media (prefers-reduced-motion: reduce) { .growth-stop b { transition: none; } }
   .growth-stop > span {
     position: absolute;
     top: -32px;
@@ -69,8 +90,15 @@
     font-size: 28px;
   }
   .growth-stop--completed b { background: var(--ink); color: var(--paper); }
-  .growth-stop--next b { border-style: double; border-width: 8px; }
+  /* Part-way through: distinct from both a finished class and one never opened, which used to
+     look identical. */
+  .growth-stop--active b { border-style: double; border-width: 8px; }
+  .growth-stop--open b { color: var(--muted); }
+  /* The class this summary is about. */
+  .growth-stop.is-current b { box-shadow: 0 0 0 4px var(--paper), 0 0 0 8px var(--ink); }
   .growth-stop strong { max-width: 145px; font-size: 11px; line-height: 1.25; }
+
+  .growth-hint { margin: 30px 0 0; color: var(--muted); font-size: 11px; letter-spacing: 1px; }
 
   .master-panel {
     min-height: 338px;
@@ -97,9 +125,21 @@
   .mastery-item div > span i { display: block; height: 100%; background: var(--ink); }
 
   .statistics-panel dl { margin: 28px 0 0; }
-  .statistics-panel dl > div { min-height: 78px; display: flex; align-items: end; justify-content: space-between; border-bottom: 3px dashed var(--gray); }
+  .statistics-panel dl > div { min-height: 78px; display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 3px dashed var(--gray); }
   .statistics-panel dl > div:last-child { border-bottom: 0; }
   .statistics-panel dt { padding-bottom: 15px; font-size: 12px; }
+  /* What the number above it actually counts. Always visible rather than behind a hover: these
+     read once and then stop being needed, and a tooltip is nothing at all on a touch screen. */
+  .statistics-panel dt span {
+    display: block;
+    max-width: 34ch;
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: .3px;
+  }
   .statistics-panel dd { margin: 0; font-family: var(--font-display); font-size: 56px; line-height: 1; }
 
   .summary-empty {
