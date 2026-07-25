@@ -10,15 +10,20 @@ import { apiMessage } from "../learning-data/apiClient";
 import { backendLearningDataSource } from "../learning-data/backendLearningDataSource";
 import type { GrowthPath } from "../learning-data/backend.types";
 
+/**
+ * Where a generated class lands on the map. The 4th is the hub every other node draws a line to,
+ * so it sits in the middle; the rest are spaced to clear it and each other at the sizes in
+ * concepts.css. Positions are percentages of the stage — move a node and its spoke follows.
+ */
 const DYNAMIC_NODE_LAYOUT: ReadonlyArray<Pick<ConceptNodeConfig, "shape" | "x" | "y" | "icon">> = [
   { shape: "square", x: 22, y: 32, icon: "solid" },
   { shape: "square small", x: 48, y: 20 },
   { shape: "wide", x: 72, y: 29, icon: "outline" },
   { shape: "circle hero", x: 47, y: 57 },
   { shape: "wide", x: 76, y: 63 },
-  { shape: "square", x: 24, y: 76, icon: "grid" },
-  { shape: "circle small-circle", x: 40, y: 70 },
-  { shape: "circle medium-circle", x: 65, y: 81 },
+  { shape: "square", x: 20, y: 78, icon: "grid" },
+  { shape: "circle small-circle", x: 38, y: 80 },
+  { shape: "circle medium-circle", x: 66, y: 82 },
 ];
 
 export function ConceptPage() {

@@ -343,6 +343,21 @@ measurement is unaffected — which is exactly why the segment is recorded even 
 Use `silent=false` for a one-to-one exchange, where a student asked something and is expected to
 answer back.
 
+### `explained` — "I don't know"
+
+The one thing that speaks even when `silent=true`. A learner who says they are stuck — "I don't
+know", "I'm not sure", "no idea", or nothing but filler — is asking for the answer, and another
+question is the single response guaranteed not to help. That turn returns the explanation as
+`student_reply` with **`explained: true`**, no question attached, and `explanations_given`
+incremented. Both the audio and text turns do this, and the flag is what lets a client tell an
+answer it must show from a line of student chatter it can drop.
+
+Detection is by phrase *and position*: the admission has to fall within the first few words. People
+front-load surrender and bury a hedge mid-sentence, so "honestly, I don't know" hands over the
+answer while "energy is sort of, I dunno, the ability to do stuff" is treated as the attempt it is
+and earns a question instead. Being told halves the concept's struggle score rather than clearing
+it — a gap survives one explanation and can come back.
+
 ---
 
 ## ⑥ `POST /plan/{path_id}/class/{class_id}/end` — "End class"

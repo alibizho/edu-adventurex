@@ -139,74 +139,110 @@
     outline-offset: 5px;
   }
 
-  /* One shape, whatever the tutorial is doing. Collapsing the drawer used to hand the viewport a
-     taller box, and the scene was re-framed to fill it: the art stretched, and the teacher's desk
-     that the crop had been hiding slid into view. Closing a drawer is not a reason for the
-     classroom to become a different picture — and the seat markers below are positioned as
-     percentages of this box, so a second framing quietly moved every `?` off its student. */
+  /* The window onto the room. Shorter than the art on purpose: the scene below keeps the picture's
+     own shape and hangs out of the bottom of this box, which crops off the teacher's desk — the
+     one piece of furniture that is behind the camera, not in front of it. */
   .classroom-viewport {
     width: 100%;
-    aspect-ratio: 2.42;
+    aspect-ratio: 2.5;
     overflow: hidden;
     border: 3px solid var(--ink);
     background: var(--paper);
   }
 
+  /* The scene is the picture, at the picture's aspect ratio, so a percentage anywhere inside it is
+     a percentage of the art. That is the whole trick: seat coordinates read off the artwork can be
+     used verbatim, and re-cropping the viewport above can never slide a student off their desk. */
   .classroom-scene {
+    --window: .74;    /* viewport height ÷ scene height: 1.85 / 2.5 */
+    --zoom: 2.2;
     position: relative;
     width: 100%;
-    height: 100%;
+    aspect-ratio: 1.85;
     transform: translate(0, 0) scale(1);
     transform-origin: center;
     will-change: transform;
   }
 
+  /* One camera move, solved rather than hand-tuned: scale by --zoom about the scene's centre, then
+     translate the seat at (--seat-x, --seat-y) onto the centre of the *viewport* — which is not
+     the centre of the scene, hence the --window term. */
   .classroom-scene.is-zooming {
     transition: transform 520ms steps(7, end);
     pointer-events: none;
+    transform:
+      translate(
+        calc((.5 - var(--seat-x)) * var(--zoom) * 100%),
+        calc((var(--window) * .5 - .5 - (var(--seat-y) - .5) * var(--zoom)) * 100%)
+      )
+      scale(var(--zoom));
   }
 
-  /* One camera move per seat, matching classroom.seats.ts. Hand-tuned against the art rather than
-     computed — the students aren't on an exact grid. */
-  .classroom-scene.is-zooming.focus-back-left   { transform: translate(26%, 14%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 16%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-back-right  { transform: translate(-24%, 14%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-left  { transform: translate(26%, -6%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -4%) scale(2.2); }
-  .classroom-scene.is-zooming.focus-front-right { transform: translate(-24%, -6%) scale(2.2); }
-
-  /* `cover`, never `fill`: the art is pixel-drawn at a fixed 1536x1024 and stretching it to an
-     arbitrary box thickens every line unevenly. Cropping keeps the pixels square. */
-  .classroom-scene > img {
+  .classroom-backdrop {
     width: 100%;
     height: 100%;
     display: block;
-    object-fit: cover;
-    object-position: center 24%;
     image-rendering: pixelated;
   }
 
-  .classroom-board-copy {
+  /* One student. Anchored by the bottom edge, which is the desk they sit behind — the poses are
+     drawn as the part of a person that shows above a desk, so they all share that baseline even
+     though they are different heights. */
+  /* Sized against the gap the room actually leaves. The blackboard's bottom edge sits ~5% of the
+     picture above the back row's desks, so a student much taller than that is drawn across the
+     board — and these sprites are black silhouettes, which on a black board is a hole. */
+  .classroom-seat {
+    /* One knob for how big the class is: the share of the picture's width taken by a single source
+       pixel of sprite. Every pose derives its width from this and its own file width, so the head
+       — 51 source pixels across in all three files — comes out the same size in all three. Sizing
+       the poses independently is what made them look like people of different ages. */
+    --unit: .066%;
+    --overhang: 0%;
     position: absolute;
-    top: 8%;
-    left: 50%;
-    width: 36%;
-    transform: translateX(-50%);
-    display: grid;
-    gap: clamp(3px, .5vw, 10px);
-    color: var(--paper);
-    font-size: clamp(12px, 1.45vw, 26px);
-    line-height: 1.15;
-    text-align: center;
-    pointer-events: none;
+    z-index: 1;
+    width: calc(129 * var(--unit));
+    transform: translate(-50%, var(--overhang));
   }
 
-  /* A raised hand. `left`/`top` arrive as inline styles from classroom.seats.ts so the seat
-     coordinates live in one place; everything visual stays here. */
+  /* How far each pose hangs below the desk it sits at, as a share of its own height.
+     The files stop at different points on the body — handup is cut off level with the desk edge,
+     idle has arms reaching past it, sleeping has one dangling — so anchoring all three by the
+     bottom of the file sat the torsos at three different heights and left the slumped ones
+     hovering. These offsets put every torso back on the same line. */
+  .classroom-seat--idle { --overhang: 13.7%; }
+
+  .classroom-seat--handup {
+    width: calc(116 * var(--unit));
+    --overhang: .9%;
+  }
+
+  .classroom-seat--sleeping {
+    width: calc(142 * var(--unit));
+    --overhang: 24.5%;
+  }
+
+  /* The paper-coloured outline is what keeps a student readable where they cross the blackboard.
+     The back row sits barely below it and the sprites are black silhouettes, so without this they
+     are a hole in the board rather than a person in front of it. Four offset shadows rather than a
+     blur: a hard 1px edge is the same outline the art draws everywhere else. */
+  .classroom-seat > img {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    filter:
+      drop-shadow(1px 0 0 var(--paper)) drop-shadow(-1px 0 0 var(--paper))
+      drop-shadow(0 1px 0 var(--paper)) drop-shadow(0 -1px 0 var(--paper));
+  }
+
+  /* A raised hand, floating over the student who put it up. Positioned against the seat rather
+     than the scene, so it follows them instead of needing coordinates of its own. */
   .student-question {
     position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
     z-index: 2;
-    width: clamp(40px, 4.4vw, 72px);
+    width: clamp(28px, 3vw, 48px);
     aspect-ratio: 1.1;
     display: grid;
     place-items: center;
@@ -217,6 +253,8 @@
     font-size: clamp(30px, 3.6vw, 58px);
     line-height: 1;
     cursor: pointer;
+    /* The resting state, for when `prefers-reduced-motion` turns the keyframes off. */
+    transform: translateX(-50%);
     transform-origin: bottom center;
     /* Pop in once, then keep bouncing until answered — a marker that stops moving stops reading as
        "waiting for you". steps() keeps it in the pixel idiom instead of easing smoothly. */
@@ -225,21 +263,25 @@
       hand-jump 1100ms steps(3, end) 240ms infinite;
   }
 
+  /* Every frame carries the centring translate: the bubble is placed with `left: 50%`, and a
+     keyframe that set only translateY would drop it and shunt the marker half its width to the
+     right for the whole animation. */
   @keyframes hand-pop {
-    from { transform: translateY(14px) scale(.4); opacity: 0; }
-    to   { transform: translateY(0) scale(1); opacity: 1; }
+    from { transform: translate(-50%, 14px) scale(.4); opacity: 0; }
+    to   { transform: translate(-50%, 0) scale(1); opacity: 1; }
   }
 
   @keyframes hand-jump {
-    0%, 55%, 100% { transform: translateY(0); }
-    65%           { transform: translateY(-24%); }
-    80%           { transform: translateY(-10%); }
+    0%, 55%, 100% { transform: translate(-50%, 0); }
+    65%           { transform: translate(-50%, -24%); }
+    80%           { transform: translate(-50%, -10%); }
   }
 
+  /* The tail, pointing down at the student the bubble belongs to. */
   .student-question::after {
     content: "";
     position: absolute;
-    left: 10px;
+    left: calc(50% - 10px);
     bottom: -15px;
     width: 19px;
     height: 19px;
@@ -572,37 +614,32 @@
       flex-basis: 42px;
     }
 
+    /* Taller window on a phone — the room is only 375px wide, and a 2.5 letterbox of it is a
+       slot. --window has to follow: it is the scene's visible fraction, 1.85 ÷ this ratio. */
     .classroom-viewport {
-      aspect-ratio: 1.55;
+      aspect-ratio: 2;
     }
 
-    .classroom-board-copy {
-      top: 8%;
-      width: 42%;
-      gap: 2px;
-      font-size: 8px;
+    .classroom-scene {
+      --window: .925;
+      /* 2.2x off a narrow viewport crops the student out of frame. */
+      --zoom: 1.7;
     }
 
     .student-question {
       width: 34px;
       border-width: 3px;
       font-size: 26px;
+      bottom: calc(100% + 6px);
     }
 
     .student-question::after {
+      left: calc(50% - 8px);
       bottom: -12px;
       width: 15px;
       height: 15px;
       border-width: 3px;
     }
-
-    /* Gentler push-in on a phone: 2.2x off a narrow viewport crops the student out of frame. */
-    .classroom-scene.is-zooming.focus-back-left   { transform: translate(20%, 11%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-back-mid    { transform: translate(2%, 12%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-back-right  { transform: translate(-18%, 11%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-left  { transform: translate(20%, -4%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-mid   { transform: translate(2%, -3%) scale(1.7); }
-    .classroom-scene.is-zooming.focus-front-right { transform: translate(-18%, -4%) scale(1.7); }
 
     .tutorial-drawer {
       margin-top: 18px;
@@ -738,6 +775,49 @@
     height: 100%;
     background: var(--ink);
     transition: width 200ms steps(8, end);
+  }
+
+  /* The class answering a question the teacher couldn't. Loud on purpose — it is the only time
+     the room stops probing and hands over the thing they were stuck on. */
+  .classroom-explanation {
+    display: flex;
+    align-items: flex-start;
+    gap: clamp(12px, 1.6vw, 22px);
+    width: min(90ch, 100%);
+    margin: 16px auto 0;
+    padding: clamp(14px, 1.5vw, 20px);
+    border: 4px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink);
+    background: var(--paper);
+  }
+
+  .classroom-explanation-bot svg {
+    width: clamp(38px, 3.4vw, 56px);
+    height: clamp(38px, 3.4vw, 56px);
+    display: block;
+  }
+
+  .classroom-explanation-body { flex: 1; min-width: 0; }
+
+  .classroom-explanation-body strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: clamp(11px, 1.05vw, 14px);
+    letter-spacing: .5px;
+  }
+
+  .classroom-explanation-body p {
+    margin: 0;
+    font-size: clamp(13px, 1.15vw, 16px);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .classroom-explanation .outline-action {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 6px 16px;
+    font-size: 13px;
   }
 
   /* --- live teaching controls (mic, level meter, last-heard line) --- */

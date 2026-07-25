@@ -10,6 +10,7 @@ import { StudentSidebar } from "./components/StudentSidebar";
 import { SessionExitScene } from "./components/SessionExitScene";
 import { Classroom } from "./components/Classroom";
 import { TeachingWorkspace } from "./components/TeachingWorkspace";
+import { useClassroomCast } from "./classroom.cast";
 import { getStudyModule, resolveStudyConceptId } from "./study.data";
 import type { StudyModule } from "./study.types";
 import { useStudySession } from "./useStudySession";
@@ -22,6 +23,7 @@ type StudyExperienceProps = {
 function StudyExperience({ studyModule }: StudyExperienceProps) {
   const navigate = useNavigate();
   const session = useStudySession(studyModule);
+  const cast = useClassroomCast(studyModule.conceptId);
   const [isClosing, setIsClosing] = useState(false);
 
   useEffect(() => {
@@ -57,6 +59,7 @@ function StudyExperience({ studyModule }: StudyExperienceProps) {
         <Classroom
           studyModule={studyModule}
           readiness={session.student.readiness}
+          cast={cast}
           onReturnToReading={session.returnToReading}
           onEnterZoom={session.startConversation}
         />

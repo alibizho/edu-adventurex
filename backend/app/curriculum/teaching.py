@@ -183,7 +183,36 @@ _GIVE_UP = (
     "i'm not sure", "im not sure", "no clue", "i give up", "give up", "you tell me", "just tell me",
     "tell me the answer", "explain it to me", "i forgot", "i can't remember", "i cant remember",
     "i can't explain", "i cant explain", "skip", "pass", "next question",
+    # Not knowing has more than one phrasing, and every one of these was silence before.
+    "i don't understand", "i dont understand", "i don't get it", "i dont get it",
+    "i don't remember", "i dont remember", "not a clue", "beats me", "what's the answer",
+    "whats the answer", "can you tell me", "i wish i knew",
 )
+
+# "I'm lost" turns up wearing every intensifier English has — "totally", "kind of", "honestly" —
+# and a fixed phrase list would need a line for each. The states are the ones a teacher uses to
+# say they have run out of road, not ones that appear inside an explanation.
+_GIVE_UP_PATTERN = re.compile(
+    r"\bi(?:'m|m| am)\s+"
+    r"(?:really |totally |completely |so |pretty |quite |honestly |kind of |kinda |a bit )?"
+    r"(?:lost|stuck|blanking|clueless|drawing a blank)\b"
+)
+
+
+# How many words an admission may hide behind before it stops being the point of the sentence.
+# "Honestly, I don't know" is surrender; "energy is sort of, I dunno, the ability to do stuff" is
+# an attempt with a verbal tic in it, and handing over the answer there takes the explanation off
+# a learner who was already halfway through giving it.
+_GIVE_UP_LEAD_WORDS = 3
+
+
+def _give_up_at(clean: str) -> int | None:
+    """Where an admission of not knowing starts in an already-normalised utterance, if at all."""
+    hits = [at for at in (clean.find(phrase) for phrase in _GIVE_UP) if at >= 0]
+    found = _GIVE_UP_PATTERN.search(clean)
+    if found:
+        hits.append(found.start())
+    return min(hits) if hits else None
 
 
 def _is_give_up(answer: str) -> bool:
@@ -192,11 +221,19 @@ def _is_give_up(answer: str) -> bool:
     This is the branch that decides between asking again and teaching. Getting it wrong in the
     permissive direction hands over an answer the learner could have reached; getting it wrong in
     the strict direction strands them, which is the bug this exists to fix.
+
+    Position is what separates the two, not the phrase: people front-load surrender and bury a
+    hedge mid-sentence. That distinction matters more now than it did — a press-to-talk chunk is a
+    whole teaching turn, so there is plenty of room for an "I dunno" to turn up inside real work.
     """
-    clean = answer.strip().casefold()
+    # The transcript comes from a speech model, which types a curly apostrophe as readily as a
+    # straight one — and "i don’t know" matches none of the phrases above. Every phrase here is
+    # written with the straight one, so normalise before comparing rather than doubling the list.
+    clean = answer.strip().casefold().replace("’", "'").replace("ʼ", "'")
     if not _strip_filler(clean):
         return True
-    return any(phrase in clean for phrase in _GIVE_UP)
+    at = _give_up_at(clean)
+    return at is not None and len(clean[:at].split()) <= _GIVE_UP_LEAD_WORDS
 
 
 def _mentions(text: str, concept: str) -> bool:
@@ -373,6 +410,25 @@ async def class_teach_turn(
 
     memory = await store.get_memory(path_id)
     progress = _advance_progress(memory, class_id, cls)
+
+    # Typing "I don't know" is the same admission as saying it, so it gets the same answer. Without
+    # this the typed path fell through to `student_turn`, whose reply is a student making
+    # conversation — which is not the thing a stuck teacher just asked for.
+    open_objectives = [o for o in cls.checklist() if o.id not in progress.covered_objectives]
+    if _is_give_up(latest_utterance) and (progress.focus_target or open_objectives):
+        stuck = progress.focus_target or _next_objective(open_objectives, progress.focus_target).text
+        said = await explain_answer(
+            TargetedQuestion(id=-1, chunk_id=resp.new_segment.id, text=f"Explain {stuck}."),
+            topic=f"{cls.title} — {cls.objective}",
+            transcript=mastery.transcript_excerpt(transcript + [resp.new_segment]),
+            objectives=[o.text for o in cls.checklist()],
+        )
+        progress.explanations_given += 1
+        _decay_concepts(progress, stuck)
+        await store.update_memory(path_id, memory)
+        return ClassTeachResponse(
+            student_reply=said, new_segment=resp.new_segment, asked=False, explained=True
+        )
 
     # Confusion gate over just-spoken utterance (mock heuristic — the SAME gate as
     # /questions/from_chunk, via engine.is_confused, so the two paths can't drift).
@@ -635,7 +691,7 @@ async def class_audio_turn(
         await _save_memory(path_id, class_id, cls, memory)
         return AudioClassTeachResponse(
             student_reply=said, new_segment=segment, analysis=analysis, degraded=False,
-            all_goals_covered=not open_objectives,
+            explained=True, all_goals_covered=not open_objectives,
         )
 
     # WHETHER to ask is still both detectors: our own confusion gate, or the ml-service having

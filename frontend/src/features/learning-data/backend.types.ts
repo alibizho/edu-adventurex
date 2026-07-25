@@ -153,6 +153,12 @@ export type ClassTeachResponse = {
   new_segment: BackendSegment;
   asked: boolean;
   question: TargetedQuestion | null;
+  /**
+   * `student_reply` is the answer to what the teacher was stuck on, not a student talking — set
+   * when they admitted they didn't know. The two need telling apart: one is a line of chatter,
+   * the other is what the learner is now meant to read.
+   */
+  explained?: boolean;
 };
 
 export type AudioClassTeachResponse = Omit<ClassTeachResponse, "new_segment"> & {

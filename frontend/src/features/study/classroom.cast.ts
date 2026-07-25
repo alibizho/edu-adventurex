@@ -2,21 +2,43 @@ import { useMemo } from "react";
 import { SEATS, type SeatId } from "./classroom.seats";
 
 /**
- * Who is actually sitting in the room this session.
+ * Who is actually sitting in the room this session, and how they are sitting.
  *
- * Clicking a `?` used to zoom in on the same generic body no matter whose hand it was, so the six
- * students were six names attached to one person. Each seat now draws its own sprite, dealt once
- * and held for the rest of the session — MILA is the same student every time you answer her, and
- * still is after a reload.
+ * Two things, dealt together because both must survive the whole class. The **sprite** is who you
+ * meet when you press a `?` — the room used to zoom in on the same generic body no matter whose
+ * hand it was, so six names shared one person. The **resting pose** is what the seat looks like
+ * from the teacher's desk: mostly heads-up, one or two asleep, which is what makes the room read
+ * as a class rather than a row of identical figures.
  *
- * The room itself is unchanged: the marker over a seat stays a plain `?`. This is only about who
- * is waiting when the camera arrives.
- *
- * Dealt randomly rather than hardcoded so the class isn't the same six people every time.
+ * Both are dealt at random rather than hardcoded, so no two classes are the same room, and both
+ * are held for the session: a student who was asleep when you started is not sitting up straight
+ * the next time you glance over.
  */
 const SPRITES: readonly string[] = [1, 2, 3, 4, 5].map((n) => `/images/students/${n}.png`);
 
-export type ClassroomCast = Readonly<Record<SeatId, string>>;
+/** How a seat sits when nothing is happening. A raised hand overrides this — see POSE_SOURCE. */
+export type RestingPose = "idle" | "sleeping";
+
+/** Every pose a seat can be drawn in, including the one no one rests in. */
+export type SeatPose = RestingPose | "handup";
+
+export const POSE_SOURCE: Readonly<Record<SeatPose, string>> = {
+  idle: "/images/idle.png",
+  sleeping: "/images/sleeping.png",
+  handup: "/images/handup.png",
+};
+
+export type SeatCast = { sprite: string; resting: RestingPose };
+export type ClassroomCast = Readonly<Record<SeatId, SeatCast>>;
+
+/**
+ * Exactly two of the six are asleep — which two is what changes between classes.
+ *
+ * A fixed count rather than a random one: the room should read the same way every time you walk
+ * into it (four heads up, two down), and rolling the number as well as the seats meant some
+ * classes opened with a single sleeper and looked like a different room.
+ */
+const ASLEEP = 2;
 
 function shuffled<T>(items: readonly T[]): T[] {
   const deck = [...items];
@@ -40,32 +62,47 @@ function neighbours(seatId: SeatId): SeatId[] {
 }
 
 /**
- * One sprite per seat, as distinct as the pool allows.
+ * One sprite per seat, as distinct as the pool allows, plus who is asleep.
  *
- * Dealing from a shuffled deck rather than choosing per seat is what stops the room seating three
- * copies of the same student. There are currently five sprites for six seats, so one of them does
- * get a twin — add a sixth file and this loop simply stops needing the second branch — and the
- * twin is seated away from the original: side by side or one behind the other, a repeat looks
- * like the same sprite drawn twice rather than two people who dress alike.
+ * Dealing sprites from a shuffled deck rather than choosing per seat is what stops the room seating
+ * three copies of the same student. There are currently five sprites for six seats, so one of them
+ * does get a twin — add a sixth file and this loop stops needing the second branch — and the twin
+ * is seated away from the original: side by side or one behind the other, a repeat looks like the
+ * same sprite drawn twice rather than two people who dress alike.
  */
 function deal(): ClassroomCast {
   const deck = shuffled(SPRITES);
-  const cast: Partial<Record<SeatId, string>> = {};
+  const sprites: Partial<Record<SeatId, string>> = {};
   SEATS.forEach((seat, index) => {
     if (index < deck.length) {
-      cast[seat.id] = deck[index];
+      sprites[seat.id] = deck[index];
       return;
     }
-    const nearby = new Set(neighbours(seat.id).map((id) => cast[id]));
-    cast[seat.id] = shuffled(SPRITES).find((sprite) => !nearby.has(sprite)) ?? deck[index % deck.length];
+    const nearby = new Set(neighbours(seat.id).map((id) => sprites[id]));
+    sprites[seat.id] = shuffled(SPRITES).find((sprite) => !nearby.has(sprite)) ?? deck[index % deck.length];
   });
-  return cast as ClassroomCast;
+
+  const asleep = new Set(shuffled(SEATS.map((seat) => seat.id)).slice(0, ASLEEP));
+
+  return Object.fromEntries(SEATS.map((seat) => [seat.id, {
+    sprite: sprites[seat.id]!,
+    resting: asleep.has(seat.id) ? "sleeping" : "idle",
+  }])) as ClassroomCast;
 }
 
 function isCast(value: unknown): value is ClassroomCast {
   if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return SEATS.every((seat) => SPRITES.includes(record[seat.id] as string));
+  const record = value as Record<string, Partial<SeatCast> | undefined>;
+  const wellFormed = SEATS.every((seat) => {
+    const entry = record[seat.id];
+    return Boolean(entry)
+      && SPRITES.includes(entry!.sprite as string)
+      && (entry!.resting === "idle" || entry!.resting === "sleeping");
+  });
+  // The sleeper count is checked, not just the shape: a cast dealt under a different rule is still
+  // well-formed, and without this a tab open from before the rule changed keeps its old room.
+  return wellFormed
+    && SEATS.filter((seat) => record[seat.id]!.resting === "sleeping").length === ASLEEP;
 }
 
 /**

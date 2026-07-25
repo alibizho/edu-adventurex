@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { PixelMicIcon, PixelReturnIcon } from "../../../components/visuals/PixelIcons";
 import { PixelRobot } from "../../../components/visuals/PixelRobot";
 import type { ClassObjective } from "../../learning-data/backend.types";
-import { SEATS, type SeatId } from "../classroom.seats";
+import { POSE_SOURCE, type ClassroomCast } from "../classroom.cast";
+import { SEATS, SEAT_BY_ID, type SeatId } from "../classroom.seats";
 import { formatElapsed, type MeterRef, type RecorderState } from "../usePressToTalkRecorder";
 import type { StudyModule } from "../study.types";
 import { ObjectiveChecklist } from "./ObjectiveChecklist";
@@ -29,6 +30,8 @@ type LiveSession = {
   isBusy: boolean;
   isResetting: boolean;
   lastHeard: string | null;
+  /** What the class told the teacher after they admitted they didn't know. */
+  explanation: string | null;
   turnCount: number;
   error: string | null;
   /** False when the GPU service is unreachable — the room falls back to typing. */
@@ -38,6 +41,7 @@ type LiveSession = {
   onToggleMic: () => void;
   /** Drop the open recording unsent — the fumbled take that isn't worth teaching. */
   onDiscardRecording: () => void;
+  onDismissExplanation: () => void;
   onTextAnswer: (text: string) => void;
   /** Throw this class's session away and start it again from nothing. */
   onReset: () => void;
@@ -47,6 +51,8 @@ type LiveSession = {
 type ClassroomProps = {
   studyModule: StudyModule;
   readiness: number;
+  /** Who is in which seat this session, and how they are sitting (see classroom.cast.ts). */
+  cast: ClassroomCast;
   /** The class's goals, and which of them the learner has demonstrably explained. */
   objectives?: readonly ClassObjective[];
   coveredObjectives?: readonly string[];
@@ -259,6 +265,7 @@ function micCaption(state: RecorderState, isBusy: boolean, queueDepth: number, e
 export function Classroom({
   studyModule,
   readiness,
+  cast,
   objectives = [],
   coveredObjectives = [],
   objectiveEvidence = {},
@@ -293,6 +300,7 @@ export function Classroom({
   const status = live ? classStatus(live, openGoals, allCovered) : null;
   const raised = live ? live.raisedHands : SEATS.map((seat) => seat.id);
   const isArmed = live ? live.recorderState !== "idle" : false;
+  const focus = zoomingTo ? SEAT_BY_ID.get(zoomingTo) ?? null : null;
 
   return (
     <main className="teaching-lobby">
@@ -336,28 +344,58 @@ export function Classroom({
       )}
 
       <section className="classroom-viewport" aria-label="Your classroom">
-        <div className={`classroom-scene${zoomingTo ? ` is-zooming focus-${zoomingTo}` : ""}`}>
-          <img src="/images/wut-classroom.png" alt="A pixel-art classroom with six students" />
-          <div className="classroom-board-copy" aria-hidden="true">
-            <span>TEACH WUT</span>
-            <span>HELP WUT UNDERSTAND</span>
-            <span>DISCOVER YOUR GAPS</span>
-          </div>
-          {SEATS.filter((seat) => raised.includes(seat.id)).map((seat) => (
-            <button
-              key={seat.id}
-              type="button"
-              className={`student-question student-question--${seat.id}`}
-              style={{ left: seat.marker.left, top: seat.marker.top }}
-              aria-label={`${seat.name} has a question — click to answer it`}
-              disabled={Boolean(zoomingTo)}
-              onClick={() => !zoomingTo && setZoomingTo(seat.id)}
-            >
-              ?
-            </button>
-          ))}
+        {/* The camera move is computed from the seat rather than hand-written per seat: the same
+            two numbers that place a student also bring them to the middle of the frame, so a desk
+            that moves in the art cannot leave its close-up pointing at the wall. */}
+        <div
+          className={`classroom-scene${zoomingTo ? " is-zooming" : ""}`}
+          style={focus ? { "--seat-x": focus.x / 100, "--seat-y": focus.base / 100 } as CSSProperties : undefined}
+        >
+          <img className="classroom-backdrop" src="/images/classroom.png" alt="" />
+          {SEATS.map((seat) => {
+            const hasQuestion = raised.includes(seat.id);
+            // A hand up outranks whatever they were doing — including sleeping through it, which
+            // is the joke the art was drawn for.
+            const pose = hasQuestion ? "handup" : cast[seat.id].resting;
+            return (
+              <div
+                key={seat.id}
+                className={`classroom-seat classroom-seat--${pose}`}
+                style={{ left: `${seat.x}%`, bottom: `${100 - seat.base}%` }}
+              >
+                <img src={POSE_SOURCE[pose]} alt="" aria-hidden="true" />
+                {hasQuestion && (
+                  <button
+                    type="button"
+                    className="student-question"
+                    aria-label={`${seat.name} has a question — click to answer it`}
+                    disabled={Boolean(zoomingTo)}
+                    onClick={() => !zoomingTo && setZoomingTo(seat.id)}
+                  >
+                    ?
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
+
+      {/* You said you didn't know, so the class tells you. This is the one moment the room stops
+          asking and answers, and it has to be readable rather than a line under the mic — it is
+          the thing the learner is now supposed to be reading. */}
+      {live?.explanation && (
+        <section className="classroom-explanation" role="status" aria-live="polite">
+          <div className="classroom-explanation-bot" aria-hidden="true"><PixelRobot /></div>
+          <div className="classroom-explanation-body">
+            <strong>YOU SAID YOU WEREN'T SURE — SO HERE IT IS</strong>
+            <p>{live.explanation}</p>
+          </div>
+          <button type="button" className="outline-action" onClick={live.onDismissExplanation}>
+            GOT IT
+          </button>
+        </section>
+      )}
 
       {/* Outside .classroom-viewport on purpose: that box is a fixed aspect-ratio window with
           overflow:hidden, so anything after the scene gets clipped out of existence. */}

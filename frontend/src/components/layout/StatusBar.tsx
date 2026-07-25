@@ -9,11 +9,6 @@ export function StatusBar({ label, full = false, meta }: StatusBarProps) {
     <footer className={`status-bar ${full ? "status-bar--full" : ""}`}>
       <div className="status-label">SYSTEM STATUS: {label}</div>
       {meta && <div className="status-meta">{meta}</div>}
-      <div className="palette-indicator" aria-label="Monochrome palette">
-        <i className="tone-black" />
-        <i className="tone-gray" />
-        <i className="tone-white" />
-      </div>
     </footer>
   );
 }

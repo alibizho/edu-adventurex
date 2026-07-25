@@ -11,7 +11,6 @@ export type MaterialPageContent = {
     imageLabel: string;
     startLabel: string;
   };
-  hint: string;
 };
 
 export const MATERIAL_PAGE_CONTENT: MaterialPageContent = {
@@ -32,7 +31,6 @@ export const MATERIAL_PAGE_CONTENT: MaterialPageContent = {
     imageLabel: "ADD IMAGES",
     startLabel: "START LEARNING",
   },
-  hint: "HINT: PASTE A YOUTUBE LINK TO GENERATE A CURRICULUM AUTOMATICALLY.",
 };
 
 export const SURPRISE_TOPICS = [

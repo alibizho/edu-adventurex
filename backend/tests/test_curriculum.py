@@ -9,12 +9,15 @@ Config is forced hermetic BEFORE the app is imported (memory store), like test_b
 import asyncio
 import os
 
+import pytest
+
 os.environ["STORE_BACKEND"] = "memory"
 os.environ["ML_SERVICE_URL"] = "http://127.0.0.1:9"  # unreachable -> neutral degrade
 
 from app.curriculum import teaching  # noqa: E402
 from app.schemas import (  # noqa: E402
     ChunkAnalysis,
+    ClassObjective,
     ClassUnit,
     GrowthPath,
     PathMemory,
@@ -206,6 +209,31 @@ def test_a_keyless_question_gets_a_follow_up_before_it_is_answered_for_you(monke
     assert second.question is None
 
 
+def test_saying_you_dont_know_to_a_student_gets_the_answer_immediately(monkeypatch):
+    """Face to face, "I don't know" skips the remaining tries and hands over the answer.
+
+    Pressing again is the one response that cannot help someone who has just said they are stuck,
+    so this must not wait for the turn cap — and it must not come back as another question.
+    """
+    _stub_conversation(monkeypatch, correct=False, follow_up_key="a travelling disturbance")
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
+    run(store.save_path(_path("gp-idk", c1, topic="Physics")))
+    sid = teaching.class_session_id("gp-idk", "c1")
+    run(store.record_questions(sid, [
+        TargetedQuestion(id=0, chunk_id=0, text="what does a wave carry?",
+                         answer_key="energy, not matter"),
+    ]))
+
+    result = _answer_once("gp-idk", c1, 0, "honestly I don't know")
+
+    assert result.student_reply == "HERE IS THE ANSWER", "the student must answer, not re-ask"
+    assert result.question is None and result.asked is False
+    assert result.conversation_over is True
+    # Told, not mastered: the concept is allowed back later.
+    progress = run(store.get_memory("gp-idk")).class_progress["c1"]
+    assert progress.explanations_given == 1
+
+
 def test_a_correct_answer_still_ends_the_conversation(monkeypatch):
     _stub_conversation(monkeypatch, correct=True)
     c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.")
@@ -238,6 +266,79 @@ def test_a_graded_question_presses_twice_before_answering_itself(monkeypatch):
 
     last = _answer_once("gp-graded", c1, question_id, "i give up on phrasing this")
     assert last.conversation_over is True and last.student_reply == "HERE IS THE ANSWER"
+
+
+def test_admitting_you_dont_know_is_answered_not_re_asked(monkeypatch):
+    """Saying "I don't know" into the room gets the answer, not another question.
+
+    The one response guaranteed not to help a stuck teacher is a fresh probe, so this branch has
+    to fire ahead of the question generator — and it has to reply out loud even in `silent` mode,
+    where every other outcome deliberately says nothing.
+    """
+    _stub_conversation(monkeypatch, correct=False)
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.",
+                   objectives=[ClassObjective(id="o1", text="Explain what a wave carries.")])
+    run(store.save_path(_path("gp-stuck", c1, topic="Physics")))
+
+    result = run(teaching.class_audio_turn(
+        "gp-stuck", "c1", c1,
+        ChunkAnalysis(chunk_id=0, text="honestly I don't know how to explain this one",
+                      confidence=0.9),
+        degraded=False, silent=True,
+    ))
+
+    assert result.student_reply == "HERE IS THE ANSWER"
+    assert result.explained is True, "the UI cannot tell an answer from chatter without this"
+    assert result.asked is False and result.question is None, "a stuck teacher must not be re-probed"
+
+
+def test_typing_that_you_dont_know_is_answered_too(monkeypatch):
+    """The GPU-offline fallback owes the same answer — it is the same admission, typed."""
+    _stub_conversation(monkeypatch, correct=False)
+
+    async def fake_student_turn(transcript, utterance):
+        nid = max((s.id for s in transcript), default=-1) + 1
+        return TeachTurnResponse(
+            student_reply="haha okay", new_segment=Segment(id=nid, idx=len(transcript), text=utterance),
+        )
+
+    monkeypatch.setattr(teaching, "student_turn", fake_student_turn)
+    c1 = ClassUnit(class_id="c1", title="Waves", objective="Understand waves.",
+                   objectives=[ClassObjective(id="o1", text="Explain what a wave carries.")])
+    run(store.save_path(_path("gp-typed", c1, topic="Physics")))
+
+    result = run(teaching.class_teach_turn("gp-typed", "c1", c1, "i have no idea honestly"))
+
+    assert result.explained is True
+    assert result.student_reply == "HERE IS THE ANSWER", "not the student's conversational reply"
+    assert result.asked is False
+
+
+@pytest.mark.parametrize("utterance", [
+    "i don't know",
+    "I don’t know",          # a speech model types the curly apostrophe just as readily
+    "hmm, I'm not sure",
+    "I don't understand this at all",
+    "yeah I'm totally lost here",
+    "no idea, sorry",
+    "um, uh, like",          # nothing left after the filler filter is a shrug too
+])
+def test_give_up_phrasings(utterance):
+    assert teaching._is_give_up(utterance), f"{utterance!r} should read as not knowing"
+
+
+@pytest.mark.parametrize("utterance", [
+    "a wave carries energy without carrying matter along with it",
+    "friction",
+    "the alliance system pulled every great power into the war",
+    # A hedge buried in real work is a verbal tic, not surrender. Reading these as giving up takes
+    # the explanation off a learner who was most of the way through giving it.
+    "uh, energy is sort of, i dunno, the ability to do stuff",
+    "waves carry energy, though i'm not sure i can explain the maths",
+    "the treaty was signed in 1919 and no idea why they picked that date",
+])
+def test_a_real_explanation_is_not_mistaken_for_giving_up(utterance):
+    assert not teaching._is_give_up(utterance)
 
 
 def test_end_class_folds_memory():

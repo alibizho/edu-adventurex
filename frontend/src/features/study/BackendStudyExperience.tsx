@@ -73,6 +73,8 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   const [hands, setHands] = useState<RaisedHand[]>([]);
   const [transcript, setTranscript] = useState<string[]>([]);
   const [lastHeard, setLastHeard] = useState<string | null>(null);
+  /** What the class told the teacher after they admitted they were stuck. */
+  const [explanation, setExplanation] = useState<string | null>(null);
   const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [turnCount, setTurnCount] = useState(0);
   // Readiness is NOT computed here any more. It is the share of class objectives the backend
@@ -88,8 +90,8 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
 
   const visualModule = useMemo(() => path && unit ? createVisualModule(path, unit) : null, [path, unit]);
   const sessionId = classSessionId(pathId, classId);
-  // Held here rather than inside the zoom view: that view mounts fresh every time a `?` is
-  // clicked, and re-dealing there would hand the same seat a different student each visit.
+  // Held here rather than inside either view: both unmount every time the camera moves between
+  // them, and re-dealing on the way would change who is sitting where mid-lesson.
   const cast = useClassroomCast(sessionId);
 
   // Recording and analysis run at different speeds: a chunk takes seconds to come back and the
@@ -165,13 +167,25 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
     return () => window.clearInterval(timer);
   }, [phase, refreshProgress]);
 
-  /** Give a new question to whichever student isn't already holding one. */
+  /**
+   * Give a new question to one of the students who isn't already holding one, picked at random.
+   *
+   * In seat order it was always the same student: the first question of every class came from the
+   * back-left desk, the second from the one beside it, and a learner who only ever triggers one or
+   * two questions a class never saw a hand anywhere else. Which desk asks carries no meaning — the
+   * backend knows nothing about seats — so it may as well come from a different corner each time.
+   */
   const raiseHand = useCallback((question: TargetedQuestion) => {
+    // Rolled out here on purpose: React invokes state updaters twice in development, and a
+    // Math.random() inside would pick a different seat on each pass.
+    const roll = Math.random();
     setHands((current) => {
       const taken = new Set(current.map((hand) => hand.seatId));
-      const free = SEATS.find((seat) => !taken.has(seat.id));
+      const free = SEATS.filter((seat) => !taken.has(seat.id));
       const entry = { question, askedAt: Date.now() };
-      if (free) return [...current, { seatId: free.id, ...entry }];
+      if (free.length > 0) {
+        return [...current, { seatId: free[Math.floor(roll * free.length)].id, ...entry }];
+      }
       // Every seat is occupied: the teacher is talking past six unanswered questions. Retire the
       // oldest — a stale probe about something said minutes ago is worth less than this one.
       const oldest = current.reduce((a, b) => (a.askedAt <= b.askedAt ? a : b));
@@ -205,6 +219,12 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
           setTranscript((current) => [...current, heard]);
           setTurnCount((current) => current + 1);
           if (response.asked && response.question) raiseHand(response.question);
+          // The teacher said they didn't know, and the class answered instead of asking again.
+          // This was being fetched and dropped on the floor, so admitting you were stuck got you
+          // silence — the one response guaranteed not to help.
+          if (response.explained && response.student_reply.trim()) {
+            setExplanation(response.student_reply.trim());
+          }
           // Every chunk now triggers a coverage check on the backend. Refresh per chunk rather
           // than once the whole queue empties: while the teacher keeps talking the queue may not
           // empty for a minute, and the checklist would sit still through all of it.
@@ -231,6 +251,11 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       setTranscript((current) => [...current, text]);
       setTurnCount((current) => current + 1);
       if (response.asked && response.question) raiseHand(response.question);
+      // Same flag as the audio path. On this one the reply is usually a student making
+      // conversation, so the flag is the only thing that separates chatter from the answer.
+      if (response.explained && response.student_reply.trim()) {
+        setExplanation(response.student_reply.trim());
+      }
     } catch (caught) {
       setError(apiMessage(caught));
     } finally {
@@ -267,9 +292,16 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
   }, []);
 
   /**
-   * Shared tail of both answer paths. The hand is NOT retired here: the student may still be
-   * unconvinced and ask a follow-up, and clearing it mid-answer used to unmount the conversation
-   * before the reply could even be shown. Leaving the zoom is what ends the exchange.
+   * Shared tail of both answer paths. The hand is NOT retired here, on any outcome.
+   *
+   * Retiring it is what removes this seat from `hands`, and `zoomHand` is looked up in that list —
+   * so the moment the hand goes, the conversation unmounts and the room replaces it with "THAT
+   * QUESTION IS RESOLVED". The final turn is the one that matters most: it carries the answer the
+   * student gives when the teacher says they don't know, or when the thread runs out of tries.
+   * Retiring on `conversation_over` deleted the view mid-sentence and the learner never read it.
+   *
+   * Walking out is what ends the exchange — both exits from the conversation call onBackToClass,
+   * which retires the hand there.
    */
   const settleTurn = useCallback(async (
     hand: RaisedHand,
@@ -284,8 +316,6 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       setHands((current) => current.map((item) => (
         item.seatId === hand.seatId ? { ...item, question: followUp, askedAt: Date.now() } : item
       )));
-    } else if (conversationOver) {
-      resolveHand(hand.seatId);
     }
     return {
       teacherText: answer,
@@ -367,6 +397,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
       setHands([]);
       setZoomSeat(null);
       setLastHeard(null);
+      setExplanation(null);
       setLastConfidence(null);
       setTurnCount(0);
       setQueueDepth(0);
@@ -418,6 +449,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
         <Classroom
           studyModule={visualModule}
           readiness={readiness}
+          cast={cast}
           objectives={classChecklist(unit)}
           coveredObjectives={progress?.covered_objectives ?? []}
           objectiveEvidence={progress?.objective_evidence ?? {}}
@@ -432,12 +464,14 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
             isBusy,
             isResetting,
             lastHeard,
+            explanation,
             turnCount,
             error: error ?? recorder.error,
             voiceAvailable,
             lastConfidence,
             onToggleMic: recorder.toggle,
             onDiscardRecording: cancelRecording,
+            onDismissExplanation: () => setExplanation(null),
             onTextAnswer: (text) => void teachText(text),
             onReset: () => void resetClass(),
             onFinish: () => void finish("self-teaching"),
@@ -453,7 +487,7 @@ export function BackendStudyExperience({ pathId, classId }: { pathId: string; cl
               {isZoom && zoomHand ? (
                 <BackendTeachingWorkspace
                   seatName={seatName(zoomHand.seatId)}
-                  sprite={cast[zoomHand.seatId]}
+                  sprite={cast[zoomHand.seatId].sprite}
                   question={zoomHand.question}
                   isBusy={isBusy}
                   error={error}

@@ -304,11 +304,18 @@ class TeachTurnBody(BaseModel):
     latest_utterance: str
 
 
+# The learner said they didn't know, so `student_reply` is the answer to what they were stuck on
+# rather than a student talking. The UI has to be able to tell the two apart: one is a line of
+# chatter, the other is the thing it must now put in front of the teacher to read.
+_EXPLAINED = "Whether student_reply is an explanation handed over after the teacher gave up."
+
+
 class ClassTeachResponse(BaseModel):
     student_reply: str
     new_segment: Segment
     asked: bool = False
     question: Optional[TargetedQuestion] = None
+    explained: bool = Field(default=False, description=_EXPLAINED)
 
 
 class AudioClassTeachResponse(BaseModel):
@@ -319,6 +326,7 @@ class AudioClassTeachResponse(BaseModel):
     asked: bool = False
     question: Optional[TargetedQuestion] = None
     degraded: bool = False
+    explained: bool = Field(default=False, description=_EXPLAINED)
     # Nothing left to teach in this class. Lets the UI say "the class is following" instead of
     # leaving a silent turn ambiguous between "you're doing well" and "it's broken".
     all_goals_covered: bool = False

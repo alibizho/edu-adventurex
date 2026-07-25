@@ -69,7 +69,6 @@ export function MaterialPage() {
           onSubmit={materialInput.submit}
         />
 
-        <p className="material-hint">{MATERIAL_PAGE_CONTENT.hint}</p>
         {materialInput.warnings.length > 0 && (
           <div className="material-api-notice" role="status">
             {materialInput.warnings.map((warning) => <p key={warning}>{warning}</p>)}
