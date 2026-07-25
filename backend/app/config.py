@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     #     The text-only /confusion/mock endpoint stays for offline dev without the GPU box. ---
     ml_service_url: str = "http://localhost:8100"
     ml_service_timeout: float = 60.0            # first call includes cold Whisper on the GPU box
+    # Health probe budget. Separate from the timeout above (that one covers real inference) but NOT
+    # a token value: the box is reachable over a tunnel to a rented GPU, and a bare /health round
+    # trip measures 4-8s from here. At the old hardcoded 5s this probe timed out intermittently and
+    # the class fell back to typing while the GPU was up and healthy.
+    ml_service_health_timeout: float = 20.0
 
     # --- Context store: "memory" (dev default, lost on restart, no extra deps) or "db" (Postgres,
     #     durable across restarts). When store_backend == "db", database_url must be set. ---
@@ -61,8 +66,12 @@ class Settings(BaseSettings):
 
     # --- Objective mastery. How many new utterances to accumulate before judging which class
     #     objectives they covered: one verifier call per check, so this is the cost/latency dial.
-    #     Checking every chunk would undo the saving that makes continuous teaching affordable. ---
-    objective_check_every: int = 3
+    #     1 = judge after every chunk. Batching at 3 was the visible lag in the CLASS GOALS panel:
+    #     chunks are pause-delimited and uploaded serially, so three of them is 15-30s of talking
+    #     before a checkmark could even be considered. The call runs in a background task the
+    #     teaching turn never waits on, so the cost is tokens, not latency. Raise it to trade
+    #     freshness back for spend. ---
+    objective_check_every: int = 1
     # Turns to wait before a student may again nudge the learner toward an uncovered objective.
     # This is what stops a clear utterance producing no reaction at all, so it is short: the room
     # steers roughly every other turn. Raise it if the class feels naggy, lower it to 1 to have a

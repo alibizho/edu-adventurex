@@ -145,6 +145,10 @@ async def class_teach_audio(
     chunk_id: int = Form(0),
     history: str = Form("[]"),
     silent: bool = Form(False),   # live classroom: record + analyze, but only speak to ask.
+    # Set when the learner is answering one specific student face to face. That turn is graded
+    # against the question's answer key and may earn a follow-up, instead of going through the
+    # classroom's question logic.
+    answering_question_id: int | None = Form(None),
     # Browser-measured delivery. The GPU scores hesitation relative to the same utterance and so
     # can't see speech that's unsure throughout; these are absolute (see SpeechProsody).
     speech_ms: int = Form(0),
@@ -173,6 +177,9 @@ async def class_teach_audio(
             [cls.title, *memory.covered_concepts, *memory.expanded_concepts]
         )
     )
+    # Carried from the previous turn's ledger: the GPU is stateless, so this is what lets its
+    # student question keep chasing one weak spot across utterances.
+    progress = memory.class_progress.get(class_id)
     analysis, degraded = await client.analyze_audio_with_status(
         audio_bytes,
         filename=audio.filename or "chunk.wav",
@@ -182,6 +189,7 @@ async def class_teach_audio(
         overall_topic=path.confirmed_topic,
         curriculum_context=curriculum_context,
         key_concepts=key_concepts,
+        focus_target=progress.focus_target if progress else "",
     )
     if total_ms > 0:
         engine.fuse_prosody(analysis, SpeechProsody(
@@ -189,7 +197,10 @@ async def class_teach_audio(
             longest_pause_ms=longest_pause_ms, mean_level=mean_level, peak_level=peak_level,
         ))
 
-    result = await class_audio_turn(path_id, class_id, cls, analysis, degraded, silent=silent)
+    result = await class_audio_turn(
+        path_id, class_id, cls, analysis, degraded, silent=silent,
+        answering_question_id=answering_question_id,
+    )
     # Objective coverage is judged after the response goes out, batched over several utterances —
     # the learner is still talking and must not wait on a verifier call.
     if not result.degraded:
