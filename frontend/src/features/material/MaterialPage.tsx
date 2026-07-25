@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../../app/routes";
 import { AppHeader } from "../../components/layout/AppHeader";
 import { StatusBar } from "../../components/layout/StatusBar";
+import { GeneratingTopics } from "./components/GeneratingTopics";
 import { MaterialEntryPanel } from "./components/MaterialEntryPanel";
 import { MATERIAL_PAGE_CONTENT, SURPRISE_TOPICS } from "./material.data";
 import type { MaterialInputStatus } from "./material.types";
@@ -33,6 +34,20 @@ export function MaterialPage() {
     }
 
     if (prompt) materialInput.updateText(prompt);
+  }
+
+  // A build takes most of a minute (a model call per class), so it takes over the screen rather
+  // than leaving the form sitting there disabled with no sign of what is happening.
+  if (materialInput.pipeline.length > 0) {
+    return (
+      <div className="screen material-screen">
+        <AppHeader />
+        <main className="material-main">
+          <GeneratingTopics lines={materialInput.pipeline} />
+        </main>
+        <StatusBar label="BUILDING YOUR COURSE" />
+      </div>
+    );
   }
 
   return (

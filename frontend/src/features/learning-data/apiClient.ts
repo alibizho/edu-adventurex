@@ -15,6 +15,51 @@ function apiBaseUrl() {
   return (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 }
 
+/**
+ * Read a newline-delimited-JSON response, one parsed object at a time.
+ *
+ * Used by the build stream, which reports each stage as it finishes. No timeout: the whole point
+ * is a request that stays open for a minute, and the stages arriving are the liveness signal that
+ * a timeout would otherwise have to guess at.
+ */
+export async function apiStream<T>(
+  path: string,
+  init: RequestInit,
+  onMessage: (message: T) => void,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl()}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init.headers },
+    });
+  } catch (error) {
+    throw new ApiError(
+      `CANNOT REACH THE BACKEND AT ${apiBaseUrl()}. CHECK THAT IT IS RUNNING.`, 0, error,
+    );
+  }
+  if (!response.ok || !response.body) {
+    throw new ApiError(`REQUEST FAILED (${response.status})`, response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // The last piece is whatever comes before the next newline — a partial line, held back until
+    // its newline arrives. Parsing it early is the classic way to lose a message mid-chunk.
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim()) onMessage(JSON.parse(line) as T);
+    }
+  }
+  if (buffer.trim()) onMessage(JSON.parse(buffer) as T);
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},

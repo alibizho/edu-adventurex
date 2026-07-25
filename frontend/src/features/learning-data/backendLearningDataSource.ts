@@ -1,8 +1,9 @@
-import { apiRequest } from "./apiClient";
+import { ApiError, apiRequest, apiStream } from "./apiClient";
 import type {
   AnalysisStatus,
   AudioClassTeachResponse,
   BackendHealth,
+  BuildEvent,
   ClassTeachResponse,
   ClassUnit,
   GrowthPath,
@@ -47,6 +48,38 @@ export const backendLearningDataSource = {
         material_text: input.materialText,
       }),
     }, 180_000);
+  },
+
+  /**
+   * The same build, reported stage by stage. Resolves with the stored path once the stream ends.
+   *
+   * A failure arrives as an `error` event rather than a status code — the response has already
+   * begun by the time anything can go wrong — so it is turned back into a thrown ApiError here
+   * and callers can treat both paths the same.
+   */
+  async buildPlanStream(
+    input: { originalInput: string; confirmedTopic: string; numClasses: number; materialText: string | null },
+    onEvent: (event: BuildEvent) => void,
+  ): Promise<GrowthPath> {
+    let built: GrowthPath | null = null;
+    let failure: string | null = null;
+    await apiStream<BuildEvent>("/plan/build/stream", {
+      method: "POST",
+      body: JSON.stringify({
+        original_input: input.originalInput,
+        confirmed_topic: input.confirmedTopic,
+        num_classes: input.numClasses,
+        material_text: input.materialText,
+      }),
+    }, (event) => {
+      if (event.stage === "done") built = event.path;
+      if (event.stage === "error") failure = event.message;
+      onEvent(event);
+    });
+    if (failure) throw new ApiError(failure, 502);
+    // Reached the end without either: the connection dropped mid-build.
+    if (!built) throw new ApiError("THE BUILD ENDED BEFORE THE COURSE WAS READY.", 0);
+    return built;
   },
 
   listPaths: () => apiRequest<GrowthPath[]>("/plan", {}, 30_000),

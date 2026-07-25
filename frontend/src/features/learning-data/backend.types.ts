@@ -131,6 +131,23 @@ export type TargetedQuestion = {
   parent_id?: number | null;
 };
 
+/**
+ * One stage of `POST /plan/build/stream`. Every event is something that finished, so the loading
+ * screen is a readout rather than a progress bar guessing at how long is left.
+ *
+ * `class` fires once per title the structuring call returned; `written` fires as each class's
+ * material lands, in arrival order (they are written in parallel), so `index` is a count, not a
+ * position in the course.
+ */
+export type BuildEvent =
+  | { stage: "topic"; topic: string; classes: number }
+  | { stage: "structuring"; topic: string; classes: number }
+  | { stage: "class"; index: number; total: number; title: string }
+  | { stage: "writing"; total: number }
+  | { stage: "written"; index: number; total: number; title: string; ok: boolean }
+  | { stage: "done"; path: GrowthPath }
+  | { stage: "error"; message: string };
+
 export type ClassTeachResponse = {
   student_reply: string;
   new_segment: BackendSegment;
