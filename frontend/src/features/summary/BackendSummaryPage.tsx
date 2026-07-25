@@ -12,11 +12,19 @@ import type { StudyToolId } from "../study/study.types";
 
 const TOOLS = [{ id: "progress", label: "Progress" }, { id: "tutorial", label: "Tutorial" }, { id: "reset", label: "Reset" }] as const;
 
-/** What each number on the statistics panel actually counts, in one line. */
+/**
+ * What each number on the statistics panel actually counts, in one line.
+ *
+ * `gaps` is the one to be careful with. It is not the classroom student's opinion — it counts
+ * TRANSCRIPT SEGMENTS from the background transfer run, where readers given your transcript scored
+ * no better than a control group that never heard it (fusion.py: blind_spot + aware_gap, both
+ * `delta <= 0`). So it is a comparison against a baseline, not a count of wrong answers, and it is
+ * per utterance rather than per concept — several may belong to one idea.
+ */
 const STAT_HINTS = {
   turns: "EVERY STRETCH OF YOUR TEACHING THE CLASS HEARD AND ANALYZED.",
   questions: "TIMES A STUDENT STOPPED YOU BECAUSE SOMETHING SOUNDED UNCLEAR.",
-  gaps: "THINGS YOU TAUGHT THAT DIDN'T LAND — THE STUDENT COULDN'T ANSWER ON THEM AFTERWARDS.",
+  gaps: "STRETCHES WHERE READERS GIVEN YOUR TEACHING SCORED NO BETTER THAN ONES WHO NEVER HEARD IT.",
 } as const;
 
 function Stat({ label, hint, value }: { label: string; hint: string; value: number | string }) {
