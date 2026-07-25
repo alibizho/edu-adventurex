@@ -2,6 +2,7 @@
 
     POST /plan/scope                           confirm / narrow the topic
     POST /plan/build                           build the ~5-class plan, teacher's notes and all
+    POST /plan/build/stream                    the same build, reported stage by stage (NDJSON)
     GET  /plan                                 every stored plan (the UI's path picker)
     GET  /plan/{path_id}                       fetch the plan
     GET  /plan/{path_id}/memory                cross-class memory + per-class progress
@@ -14,13 +15,18 @@
 Thin — the LLM work lives in app/curriculum/, memory + reuse of the confusion/targeted pipeline in
 app/curriculum/teaching.py.
 """
+import json
+
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from .forms import json_string_list
 
 from ..curriculum.build import (
+    STRUCTURE_FAILED,
     CurriculumGenerationError,
     build_plan,
+    build_plan_events,
     generate_class_notes,
     scope_topic,
 )
@@ -89,12 +95,33 @@ async def plan_build(req: BuildPlanRequest) -> GrowthPath:
     try:
         path = await build_plan(req)
     except CurriculumGenerationError as exc:
-        raise HTTPException(
-            502,
-            "THE LANGUAGE MODEL COULD NOT PRODUCE A VALID COURSE STRUCTURE. PLEASE TRY AGAIN.",
-        ) from exc
+        raise HTTPException(502, STRUCTURE_FAILED) from exc
     await store.save_path(path)
     return path
+
+
+@router.post("/build/stream")
+async def plan_build_stream(req: BuildPlanRequest) -> StreamingResponse:
+    """The same build, reported line by line as newline-delimited JSON.
+
+    The build is N+1 model calls and runs the better part of a minute; a spinner over that reads
+    as a hang. Stages: `topic` (echoing what was confirmed), `structuring`, one `class` per title
+    the structuring call returned, `writing`, then one `written` per class as its material lands —
+    in arrival order, not course order — and finally `done` carrying the stored GrowthPath.
+
+    A failure arrives as an `error` event, not a status code: by then the response has already
+    started, so 502 is no longer available. Clients must read to `done` or `error`.
+    """
+    async def stream():
+        async for event in build_plan_events(req):
+            if event["stage"] == "done":
+                path: GrowthPath = event["path"]
+                # Stored before the client is told, so the redirect that follows always finds it.
+                await store.save_path(path)
+                event = {"stage": "done", "path": path.model_dump()}
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 @router.get("", response_model=list[GrowthPath])

@@ -16,7 +16,8 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from typing import Any
 
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, Field
@@ -55,6 +56,14 @@ class _CurriculumDraft(BaseModel):
 
 class CurriculumGenerationError(RuntimeError):
     """The model responded, but did not produce the requested curriculum shape."""
+
+
+# What the learner is told when the course can't be structured. One copy: the plain route returns
+# it as a 502 body, the stream has to deliver it in-band (a response that has already started
+# cannot go back and become a 502), and the two must say the same thing.
+STRUCTURE_FAILED = (
+    "THE LANGUAGE MODEL COULD NOT PRODUCE A VALID COURSE STRUCTURE. PLEASE TRY AGAIN."
+)
 
 
 def _json_system(prompt: str, schema: type[BaseModel]) -> str:
@@ -177,6 +186,70 @@ async def build_plan(req: BuildPlanRequest) -> GrowthPath:
     return path
 
 
+async def build_plan_events(req: BuildPlanRequest) -> AsyncIterator[dict[str, Any]]:
+    """`build_plan`, reported as it happens.
+
+    Same two steps and the same functions — this exists because the build is now N+1 model calls
+    and takes most of a minute, and a spinner over that is indistinguishable from a hang. Each
+    event is something that actually finished, so the screen is a readout, not a progress bar
+    pretending to know how long is left.
+
+    The final event carries the built `GrowthPath` under "path"; the caller stores it. Yields
+    `{"stage": "error"}` rather than raising, since a stream that has already begun cannot go back
+    and become an HTTP 502.
+    """
+    n = max(1, req.num_classes if req.num_classes is not None else settings.default_classes)
+    material = (req.material_text or "").strip()
+    yield {"stage": "topic", "topic": req.confirmed_topic, "classes": n}
+
+    yield {"stage": "structuring", "topic": req.confirmed_topic, "classes": n}
+    try:
+        classes, order = await structure_curriculum(req.confirmed_topic, n, material)
+    except CurriculumGenerationError as exc:
+        log.warning("curriculum structure failed: %r", exc)
+        yield {"stage": "error", "message": STRUCTURE_FAILED}
+        return
+
+    path = GrowthPath(
+        path_id=f"gp-{uuid.uuid4().hex[:8]}",
+        original_input=req.original_input,
+        confirmed_topic=req.confirmed_topic,
+        total_classes=len(classes),
+        recommended_order=order,
+        classes=classes,
+        source_material_summary=(material[:500] + "…") if material else None,
+    )
+    for index, cls in enumerate(path.classes, start=1):
+        yield {"stage": "class", "index": index, "total": len(path.classes), "title": cls.title}
+
+    # The long half. Classes land out of order (whichever call returns first), so each one is
+    # numbered by arrival — the count is the honest signal, not the sequence.
+    yield {"stage": "writing", "total": len(path.classes)}
+    done: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+    writer = asyncio.create_task(
+        generate_all_class_notes(
+            path, material, on_done=lambda c, ok: done.put_nowait((c.title, ok))
+        )
+    )
+    written = 0
+    while written < len(path.classes):
+        try:
+            title, ok = await asyncio.wait_for(done.get(), timeout=0.5)
+        except TimeoutError:
+            # Nothing landed in that window. Only give up once the writer itself is finished —
+            # it is what decides when there is nothing more coming.
+            if writer.done():
+                break
+            continue
+        written += 1
+        yield {
+            "stage": "written", "index": written, "total": len(path.classes),
+            "title": title, "ok": ok,
+        }
+    await writer
+    yield {"stage": "done", "path": path}
+
+
 def _ordered_split(
     path: GrowthPath, cls: ClassUnit
 ) -> tuple[list[ClassUnit], list[ClassUnit]]:
@@ -248,7 +321,11 @@ async def _write_notes(user: str) -> str:
 
 
 async def generate_all_class_notes(
-    path: GrowthPath, material: str | None = None, *, concurrency: int | None = None
+    path: GrowthPath,
+    material: str | None = None,
+    *,
+    concurrency: int | None = None,
+    on_done: Callable[[ClassUnit, bool], None] | None = None,
 ) -> list[str]:
     """Write every class's notes at once, each call seeing the whole outline.
 
@@ -259,6 +336,10 @@ async def generate_all_class_notes(
     Returns the class_ids whose notes could not be written. They keep `notes_generated=False`, and
     the lazy /notes route fills them on demand — a rate-limited notes tier must not cost the
     learner the course they just agreed to.
+
+    `on_done(cls, ok)` fires as each class lands, in completion order rather than course order, so
+    a caller streaming progress can report a class the moment it is written instead of after the
+    slowest one. It runs inside the gather, so it must not block.
     """
     sem = asyncio.Semaphore(max(1, concurrency or settings.notes_concurrency))
 
@@ -266,10 +347,18 @@ async def generate_all_class_notes(
         async with sem:
             # Inside the semaphore: the budget covers the call, not the time spent queued behind
             # an earlier wave.
-            return await asyncio.wait_for(
+            notes = await asyncio.wait_for(
                 _write_notes(_notes_user_message(path, cls, material=material)),
                 timeout=settings.notes_timeout,
             )
+        # Applied here rather than after the gather so `on_done` can report a finished class while
+        # its siblings are still being written.
+        if notes.strip():
+            cls.teacher_notes = notes
+            cls.notes_generated = True
+        if on_done is not None:
+            on_done(cls, cls.notes_generated)
+        return notes
 
     results = await asyncio.gather(
         *(one(cls) for cls in path.classes), return_exceptions=True
@@ -277,7 +366,7 @@ async def generate_all_class_notes(
 
     failed: list[str] = []
     for cls, result in zip(path.classes, results):
-        # A cancelled request (the client hung up) is not eight model failures.
+        # A cancelled request (the client hung up) is not N model failures.
         if isinstance(result, asyncio.CancelledError):
             raise result
         # A blank primer counts as failure: persisted with notes_generated=True it would be a
@@ -285,9 +374,9 @@ async def generate_all_class_notes(
         if isinstance(result, BaseException) or not str(result).strip():
             failed.append(cls.class_id)
             log.warning("notes generation failed for %s: %r", cls.class_id, result)
-            continue
-        cls.teacher_notes = str(result)
-        cls.notes_generated = True
+            if on_done is not None and isinstance(result, BaseException):
+                # The success path already reported; a raised call never got the chance.
+                on_done(cls, False)
     return failed
 
 

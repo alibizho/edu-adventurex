@@ -12,6 +12,7 @@ classes and asserts the whole flow hangs together:
 Run:  .venv/bin/python -m pytest tests/test_workflow.py -q
 """
 import asyncio
+import json
 import os
 
 os.environ["STORE_BACKEND"] = "memory"
@@ -949,6 +950,56 @@ def test_a_total_notes_failure_still_returns_the_course(monkeypatch):
     path = _build_three()
     assert [c["class_id"] for c in path["classes"]] == ["c1", "c2", "c3"]
     assert not any(c["notes_generated"] for c in path["classes"])
+
+
+def test_the_build_stream_reports_each_stage_and_stores_the_course(monkeypatch):
+    """The loading screen is driven by these events, and the last one is what the redirect needs.
+    A build is most of a minute, so every stage has to be something that actually finished."""
+    _stub_llm()(monkeypatch)
+    _stub_three_classes(monkeypatch)
+    _fake_generator(monkeypatch)
+
+    r = client.post("/plan/build/stream", json={
+        "original_input": "mechanics", "confirmed_topic": "Mechanics", "num_classes": 3,
+    })
+    assert r.status_code == 200
+    events = [json.loads(line) for line in r.text.splitlines() if line.strip()]
+    stages = [e["stage"] for e in events]
+
+    assert stages[0] == "topic" and events[0]["classes"] == 3
+    assert stages.count("class") == 3, "one line per title the structuring call returned"
+    assert stages.count("written") == 3, "and one as each class's material lands"
+    assert stages[-1] == "done"
+    # Titles, not notes — that is all the readout shows.
+    assert {e["title"] for e in events if e["stage"] == "class"} == \
+           {"Forces", "Newton's Laws", "Energy"}
+    # `written` is numbered by arrival, so the count is what the screen can trust.
+    assert [e["index"] for e in events if e["stage"] == "written"] == [1, 2, 3]
+
+    # Saved before the client was told, so the redirect that follows always finds it.
+    pid = events[-1]["path"]["path_id"]
+    stored = client.get(f"/plan/{pid}").json()
+    assert all(c["notes_generated"] and c["teacher_notes"] for c in stored["classes"])
+
+
+def test_the_build_stream_reports_a_structure_failure_in_band(monkeypatch):
+    """The response has already started by then, so a 502 is no longer available — the screen has
+    to be told inside the stream or it waits forever."""
+    _stub_llm()(monkeypatch)
+
+    async def boom(confirmed_topic, num_classes, material):
+        raise build.CurriculumGenerationError("bad json")
+
+    monkeypatch.setattr(build, "structure_curriculum", boom)
+
+    r = client.post("/plan/build/stream", json={
+        "original_input": "mechanics", "confirmed_topic": "Mechanics", "num_classes": 3,
+    })
+    assert r.status_code == 200
+    events = [json.loads(line) for line in r.text.splitlines() if line.strip()]
+    assert events[-1]["stage"] == "error"
+    assert events[-1]["message"] == build.STRUCTURE_FAILED
+    assert not any(e["stage"] == "done" for e in events)
 
 
 def test_lazy_notes_still_serves_a_path_built_before_this(monkeypatch):
