@@ -19,7 +19,10 @@ function segment(value: string) {
 
 export const backendLearningDataSource = {
   health: () => apiRequest<BackendHealth>("/health", {}, 6_000),
-  confusionHealth: () => apiRequest<{ reachable: boolean; error?: string }>("/confusion/health", {}, 7_000),
+  // Must stay above the backend's own ml_service_health_timeout: this probe crosses a tunnel to a
+  // rented GPU box and measures 4-8s. At 7s it timed out intermittently and the class dropped to
+  // "GPU VOICE ANALYSIS OFFLINE" with the engine up and healthy.
+  confusionHealth: () => apiRequest<{ reachable: boolean; error?: string }>("/confusion/health", {}, 25_000),
 
   extractMaterials(files: readonly File[]) {
     const form = new FormData();
@@ -76,11 +79,17 @@ export const backendLearningDataSource = {
     history: string[],
     silent = false,
     prosody?: SpeechProsody,
+    answeringQuestionId?: number,
   ) {
     const form = new FormData();
     form.append("chunk_id", String(chunkId));
     form.append("history", JSON.stringify(history));
     form.append("silent", String(silent));
+    // Answering one student face to face: the backend grades this against the question's answer
+    // key and may come back with a follow-up instead of accepting whatever was said.
+    if (answeringQuestionId !== undefined) {
+      form.append("answering_question_id", String(answeringQuestionId));
+    }
     // How it sounded. The GPU can't see hesitation that runs through a whole utterance, so the
     // recorder measures pauses and dead air directly (see useContinuousRecorder.ts).
     if (prosody) {

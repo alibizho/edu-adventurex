@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PixelMicIcon } from "../../../components/visuals/PixelIcons";
 import type { TargetedQuestion } from "../../learning-data/backend.types";
 import { useContinuousRecorder, type SpeechProsody } from "../useContinuousRecorder";
 
-type TurnResult = { teacherText: string; studentText: string };
+type TurnResult = { teacherText: string; studentText: string; isOver: boolean };
 
 type BackendTeachingWorkspaceProps = {
   seatName: string;
@@ -20,6 +20,10 @@ type BackendTeachingWorkspaceProps = {
  * One student, up close. You got here by clicking the `?` over their head, so there is exactly one
  * thing to do: answer what they asked. The mic is armed on arrival — this is a conversation, not a
  * form, and making the teacher hunt for a button breaks the momentum they had while teaching.
+ *
+ * It really is a conversation: the backend grades each answer against the question's answer key, so
+ * a vague one earns a follow-up on the same concept rather than being accepted. The exchange ends
+ * when the student is satisfied (or has run out of follow-ups) — `isOver` on the turn result.
  */
 export function BackendTeachingWorkspace({
   seatName,
@@ -31,17 +35,42 @@ export function BackendTeachingWorkspace({
   onTextAnswer,
   onBackToClass,
 }: BackendTeachingWorkspaceProps) {
-  const [reply, setReply] = useState<string | null>(null);
+  // The thread so far, oldest first. `isOver` is tracked separately from "has the student said
+  // anything": a reply that comes with a follow-up means the conversation continues.
+  const [turns, setTurns] = useState<{ speaker: "you" | "student"; text: string }[]>([]);
+  const [isOver, setIsOver] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [draft, setDraft] = useState("");
 
+  // The audio path runs from onaudioprocess, outside React's schedule, so it cannot read the state
+  // above: between a send resolving and React committing the reset, a closing utterance would see a
+  // stale `true` and be dropped silently — the teacher's sentence vanishes and nobody replies.
+  const isSendingRef = useRef(false);
+
+  const startSending = () => {
+    isSendingRef.current = true;
+    setIsSending(true);
+  };
+  const finishSending = () => {
+    isSendingRef.current = false;
+    setIsSending(false);
+  };
+
+  const recordTurn = (result: TurnResult | null) => {
+    if (!result) return;
+    setTurns((current) => [
+      ...current,
+      { speaker: "you", text: result.teacherText },
+      { speaker: "student", text: result.studentText },
+    ]);
+    if (result.isOver) setIsOver(true);
+  };
+
   const recorder = useContinuousRecorder({
     onUtterance: (audio, prosody) => {
-      if (isSending) return;
-      setIsSending(true);
-      void onAudioAnswer(audio, prosody)
-        .then((result) => { if (result) setReply(result.studentText); })
-        .finally(() => setIsSending(false));
+      if (isSendingRef.current) return;
+      startSending();
+      void onAudioAnswer(audio, prosody).then(recordTurn).finally(finishSending);
     },
   });
 
@@ -56,18 +85,17 @@ export function BackendTeachingWorkspace({
     const trimmed = draft.trim();
     if (!trimmed || isSending) return;
     setDraft("");
-    setIsSending(true);
-    void onTextAnswer(trimmed)
-      .then((result) => { if (result) setReply(result.studentText); })
-      .finally(() => setIsSending(false));
+    startSending();
+    void onTextAnswer(trimmed).then(recordTurn).finally(finishSending);
   }
 
-  // Once they've understood, stop listening — otherwise the room keeps recording a teacher who has
-  // moved on and is now talking to someone else.
-  useEffect(() => { if (reply) disarm(); }, [reply, disarm]);
+  // Stop listening only once the student is actually satisfied. Disarming after every reply is what
+  // made this a one-shot form: a follow-up would arrive with no way left to answer it.
+  useEffect(() => { if (isOver) disarm(); }, [isOver, disarm]);
 
   const busy = isBusy || isSending;
-  const meter = Math.min(100, Math.round(recorder.level * 900));
+  // What the student is saying right now: their newest line, or the question that got you here.
+  const lastStudentLine = [...turns].reverse().find((turn) => turn.speaker === "student")?.text;
 
   return (
     <section className="conversation-stage conversation-stage--question" aria-label={`Conversation with ${seatName}`}>
@@ -77,10 +105,19 @@ export function BackendTeachingWorkspace({
 
       <div className="student-speech" role="status" aria-live="polite">
         <strong className="student-speech-name">{seatName}</strong>
-        <p>{reply ?? question.text}</p>
+        <p>{lastStudentLine ?? question.text}</p>
+        {turns.length > 2 && (
+          <ol className="student-speech-thread">
+            {turns.slice(0, -2).map((turn, index) => (
+              <li key={index} className={`thread-turn thread-turn--${turn.speaker}`}>
+                <span>{turn.speaker === "you" ? "YOU" : seatName}</span> {turn.text}
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
 
-      {reply ? (
+      {isOver ? (
         <button type="button" className="acknowledgement-button" onClick={onBackToClass}>
           BACK TO CLASS
         </button>
@@ -106,18 +143,30 @@ export function BackendTeachingWorkspace({
         </div>
       ) : (
         <div className="voice-control">
-          <div className={`voice-button is-armed${recorder.state === "speaking" ? " is-listening" : ""}`} aria-hidden="true">
+          {/* A real button, not decoration. It used to be an aria-hidden <div> with no handler, so
+              a teacher who wanted to stop talking — or restart after the mic dropped — had nothing
+              to press and no way to tell the room was still listening. */}
+          <button
+            type="button"
+            className={`voice-button${recorder.state === "speaking" ? " is-listening" : ""}${recorder.isArmed ? " is-armed" : ""}`}
+            aria-label={recorder.isArmed ? "Stop answering" : "Start answering"}
+            aria-pressed={recorder.isArmed}
+            onClick={() => (recorder.isArmed ? disarm() : void arm())}
+          >
             <PixelMicIcon />
-          </div>
+          </button>
           <strong>
             {busy ? "THINKING..."
+              : !recorder.isArmed ? "CLICK THE MIC TO ANSWER"
               : recorder.state === "calibrating" ? "LISTENING TO THE ROOM..."
               : recorder.state === "speaking" ? "HEARING YOU — PAUSE WHEN DONE"
               : "ANSWER OUT LOUD"}
           </strong>
-          <div className="mic-meter" aria-hidden="true">
-            <div className="mic-meter-fill" style={{ width: `${meter}%` }} />
-          </div>
+          {recorder.isArmed && (
+            <div className="mic-meter" aria-hidden="true">
+              <div className="mic-meter-fill" ref={recorder.meterRef} />
+            </div>
+          )}
           {question.anomaly_type && <span>DETECTED: {question.anomaly_type.replaceAll("_", " ").toUpperCase()}</span>}
         </div>
       )}

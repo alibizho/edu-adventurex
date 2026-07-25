@@ -20,10 +20,25 @@
     text-align: center;
   }
 
+  /* Centres its children for any node count. The old absolute percent slots left one path stranded
+     near the top-left and made a seventh path overlap the first. `padding-top` keeps the nodes
+     clear of .map-back, which stays absolutely positioned in this same box. */
   .domain-map,
-  .domain-concept-map { position: relative; width: min(1380px, 100%); min-height: 830px; margin: 30px auto 0; }
+  .domain-concept-map {
+    position: relative;
+    width: min(1380px, 100%);
+    min-height: 420px;
+    margin: 30px auto 0;
+    padding: 92px 20px 40px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+    gap: 34px;
+  }
   .map-node {
-    position: absolute;
+    position: static;
     min-width: 150px;
     min-height: 150px;
     display: grid;
@@ -47,12 +62,6 @@
   .map-node--complete { background: var(--ink); color: var(--paper); }
   .map-node--complete i { border-color: var(--paper); background: var(--paper); }
 
-  .domain-node--maths { top: 20%; left: 16%; width: 180px; height: 180px; }
-  .domain-node--quantum-physics { top: 9%; right: 14%; }
-  .domain-node--case-studies { bottom: 11%; left: 26%; width: 185px; height: 185px; }
-  .domain-node--history { right: 38%; bottom: 14%; min-width: 150px; min-height: 150px; border-radius: 50%; }
-  .domain-node--history i { display: none; }
-
   .map-back {
     position: absolute;
     top: 20px;
@@ -65,11 +74,6 @@
     cursor: pointer;
   }
   .map-back:hover { background: var(--ink); color: var(--paper); }
-  .concept-map-node--1 { top: 18%; left: 13%; }
-  .concept-map-node--2 { top: 32%; left: 37%; border-radius: 50%; }
-  .concept-map-node--3 { top: 15%; right: 16%; }
-  .concept-map-node--4 { right: 35%; bottom: 12%; border-radius: 50%; }
-
   .map-message {
     width: min(660px, 100%);
     min-height: 220px;
@@ -92,13 +96,9 @@
       grid-template-columns: 1fr;
       gap: 20px;
       margin-top: 38px;
+      padding: 78px 0 20px;
     }
     .map-node,
-    .domain-node--maths,
-    .domain-node--quantum-physics,
-    .domain-node--case-studies,
-    .domain-node--history,
-    .concept-map-node,
     .concept-map-node {
       position: relative;
       inset: auto;
@@ -113,15 +113,5 @@
   }
 }
 
-.backend-domain-map .backend-domain-node,
-.domain-concept-map .concept-map-node {
-  left: var(--map-x);
-  top: var(--map-y);
-}
 .backend-domain-node { width: 180px; min-height: 150px; }
 .backend-domain-node strong { max-width: 145px; overflow-wrap: anywhere; }
-
-@media (max-width: 780px) {
-  .backend-domain-map .backend-domain-node,
-  .domain-concept-map .concept-map-node { position: static; transform: none; }
-}

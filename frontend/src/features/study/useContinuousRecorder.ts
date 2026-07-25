@@ -19,7 +19,13 @@ const BLOCK_SIZE = 4096;         // ~85 ms at 48 kHz
 /** A pause shorter than SILENCE_HOLD_MS, but long enough to be a stall rather than a word gap. */
 const HESITATION_PAUSE_MS = 350;
 
+/** The meter saturates around a normal speaking level so quiet speech still moves it visibly. */
+const METER_GAIN = 900;
+
 export type RecorderState = "idle" | "calibrating" | "waiting" | "speaking";
+
+/** Attach to the `.mic-meter-fill` div; the recorder drives that node's width itself. */
+export type MeterRef = (node: HTMLDivElement | null) => void;
 
 /**
  * How the utterance *sounded*, measured from the same RMS blocks the VAD already runs on.
@@ -44,13 +50,28 @@ type Options = {
 
 export function useContinuousRecorder({ onUtterance }: Options) {
   const [state, setState] = useState<RecorderState>("idle");
-  const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const contextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+
+  // The meter is decoration that moves ~11x/second. Through useState that re-rendered the whole
+  // class on every audio block, which starved effects owning timers — Classroom's 520 ms zoom was
+  // cleared and re-armed faster than it could fire, so clicking a student never opened the zoom.
+  // The value lives in a ref and a rAF loop writes it onto the node the consumer hands us: smoother
+  // than the block rate, and zero renders.
+  const levelRef = useRef(0);
+  const meterNodeRef = useRef<HTMLDivElement | null>(null);
+  const meterFrameRef = useRef(0);
+  const paintedPctRef = useRef(-1);
+
+  // Every arm() stamps itself with a token before it awaits getUserMedia. teardown() bumps it, so
+  // an arm that resolves after a disarm/unmount can tell the stream in its hand is unwanted — it is
+  // the only code still holding that stream, so if it doesn't stop it nothing will and the browser
+  // keeps the recording indicator lit for the life of the tab.
+  const armTokenRef = useRef(0);
 
   // Ring of recent blocks kept while nobody is speaking. When speech starts we prepend these, so
   // the chunk doesn't begin mid-word — without it every utterance loses its first consonant and
@@ -77,7 +98,46 @@ export function useContinuousRecorder({ onUtterance }: Options) {
   const onUtteranceRef = useRef(onUtterance);
   onUtteranceRef.current = onUtterance;
 
+  const paintMeter = useCallback(() => {
+    const node = meterNodeRef.current;
+    if (!node) return;
+    const pct = Math.min(100, Math.round(levelRef.current * METER_GAIN));
+    // Skipping an unchanged value stops the CSS step-transition restarting 60x/second.
+    if (pct === paintedPctRef.current) return;
+    paintedPctRef.current = pct;
+    node.style.width = `${pct}%`;
+  }, []);
+
+  // Painting on attach matters: refs run during commit, before the browser paints, so a bar that
+  // mounts mid-session never flashes at its CSS default width.
+  const meterRef = useCallback<MeterRef>((node) => {
+    meterNodeRef.current = node;
+    paintedPctRef.current = -1;
+    paintMeter();
+  }, [paintMeter]);
+
+  // Reads the node every frame rather than capturing it: Classroom only mounts the bar once armed
+  // (after this starts), while BackendTeachingWorkspace mounts it before arm() resolves. Both work.
+  const startMeterLoop = useCallback(() => {
+    if (meterFrameRef.current) return;
+    const frame = () => {
+      meterFrameRef.current = requestAnimationFrame(frame);
+      paintMeter();
+    };
+    meterFrameRef.current = requestAnimationFrame(frame);
+  }, [paintMeter]);
+
   const teardown = useCallback(() => {
+    // Bump first. An arm() parked on getUserMedia re-reads this the moment it resumes; without the
+    // bump it goes on to build a live AudioContext + MediaStream that no ref points at.
+    armTokenRef.current += 1;
+    if (meterFrameRef.current) cancelAnimationFrame(meterFrameRef.current);
+    meterFrameRef.current = 0;
+    levelRef.current = 0;
+    paintedPctRef.current = -1;
+    // Written inline rather than via paintMeter() to keep this callback's deps empty — see the
+    // unmount effect at the bottom, which makes teardown's identity the mic's kill switch.
+    if (meterNodeRef.current) meterNodeRef.current.style.width = "0%";
     processorRef.current?.disconnect();
     sourceRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -119,6 +179,10 @@ export function useContinuousRecorder({ onUtterance }: Options) {
 
   const arm = useCallback(async () => {
     if (contextRef.current) return;
+    // Claim a token AFTER that guard and BEFORE the await. The guard only rejects an arm once a
+    // previous one has finished; two arms overlapping inside the await both sail past it (React
+    // StrictMode's mount/unmount/mount does exactly that), so the loser needs a way to know it lost.
+    const token = (armTokenRef.current += 1);
     setError(null);
     let stream: MediaStream;
     try {
@@ -127,7 +191,16 @@ export function useContinuousRecorder({ onUtterance }: Options) {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch {
-      setError("MICROPHONE ACCESS WAS DENIED OR IS UNAVAILABLE.");
+      // Superseded arms stay quiet: a denial from a session the teacher already left must not paint
+      // an error over the one that is now running.
+      if (armTokenRef.current === token) setError("MICROPHONE ACCESS WAS DENIED OR IS UNAVAILABLE.");
+      return;
+    }
+
+    // Disarmed, unmounted, or overtaken while the permission prompt was open. Everything below is
+    // synchronous, so this one check covers the whole race window.
+    if (armTokenRef.current !== token) {
+      stream.getTracks().forEach((track) => track.stop());
       return;
     }
 
@@ -154,7 +227,7 @@ export function useContinuousRecorder({ onUtterance }: Options) {
       for (let i = 0; i < block.length; i += 1) sum += block[i] * block[i];
       const rms = Math.sqrt(sum / block.length);
       const now = performance.now();
-      setLevel(rms);
+      levelRef.current = rms;
 
       // Phase 1 — learn the room. A fixed threshold is the classic failure: a laptop fan or an
       // air conditioner sits above it and the VAD never closes an utterance, or the room is dead
@@ -235,8 +308,9 @@ export function useContinuousRecorder({ onUtterance }: Options) {
     streamRef.current = stream;
     sourceRef.current = source;
     processorRef.current = processor;
+    startMeterLoop();
     setState("calibrating");
-  }, [emit, resetProsody]);
+  }, [emit, resetProsody, startMeterLoop]);
 
   const disarm = useCallback(() => {
     // Don't discard a sentence in progress just because the teacher clicked stop mid-thought.
@@ -244,17 +318,18 @@ export function useContinuousRecorder({ onUtterance }: Options) {
       const speechMs = performance.now() - speechStartedAtRef.current;
       if (speechMs >= MIN_SPEECH_MS) emit(speechRef.current, blockMsRef.current);
     }
-    teardown();
+    teardown();          // also zeroes the meter, so a bar still on screen lands at empty
     setState("idle");
-    setLevel(0);
   }, [emit, teardown]);
 
+  // teardown's deps are empty on purpose: if its identity churned, this cleanup would fire and cut
+  // the mic mid-class on an unrelated re-render.
   useEffect(() => teardown, [teardown]);
 
   return {
     state,
-    level,
     error,
+    meterRef,
     threshold: thresholdRef.current,
     isArmed: state !== "idle",
     isSpeaking: state === "speaking",

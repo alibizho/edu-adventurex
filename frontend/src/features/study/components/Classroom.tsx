@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PixelMicIcon, PixelReturnIcon } from "../../../components/visuals/PixelIcons";
 import { PixelRobot } from "../../../components/visuals/PixelRobot";
 import type { ClassObjective } from "../../learning-data/backend.types";
 import { SEATS, type SeatId } from "../classroom.seats";
-import type { RecorderState } from "../useContinuousRecorder";
+import type { MeterRef, RecorderState } from "../useContinuousRecorder";
 import type { StudyModule } from "../study.types";
 import { ObjectiveChecklist } from "./ObjectiveChecklist";
 
@@ -21,7 +21,8 @@ type LiveSession = {
   /** Seats whose student is waiting to ask something. Only these show a `?`. */
   raisedHands: readonly SeatId[];
   recorderState: RecorderState;
-  level: number;
+  /** Bound straight to the meter's DOM node; the recorder animates it without re-rendering us. */
+  meterRef: MeterRef;
   queueDepth: number;
   isBusy: boolean;
   lastHeard: string | null;
@@ -259,23 +260,27 @@ export function Classroom({
   const [zoomingTo, setZoomingTo] = useState<SeatId | null>(null);
   const [isTutorialOpen, setIsTutorialOpen] = useState(true);
 
+  // The zoom timer must survive parent re-renders. Keeping the callback in a ref instead of a dep
+  // means the 520 ms is measured once per click — with the prop in deps, every re-render of the
+  // parent during the transition cleared and restarted it, and a busy room never zoomed at all.
+  const onEnterZoomRef = useRef(onEnterZoom);
+  onEnterZoomRef.current = onEnterZoom;
+
   useEffect(() => {
     if (!zoomingTo) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      onEnterZoom(zoomingTo);
+      onEnterZoomRef.current(zoomingTo);
       return;
     }
-    const timer = window.setTimeout(() => onEnterZoom(zoomingTo), ZOOM_DURATION);
+    const timer = window.setTimeout(() => onEnterZoomRef.current(zoomingTo), ZOOM_DURATION);
     return () => window.clearTimeout(timer);
-  }, [zoomingTo, onEnterZoom]);
+  }, [zoomingTo]);
 
   const openGoals = objectives.filter((objective) => !coveredObjectives.includes(objective.id));
   const allCovered = objectives.length > 0 && openGoals.length === 0;
   const status = live ? classStatus(live, openGoals, allCovered) : null;
   const raised = live ? live.raisedHands : SEATS.map((seat) => seat.id);
   const isArmed = live ? live.recorderState !== "idle" : false;
-  // The meter saturates around a normal speaking level so quiet speech still moves it visibly.
-  const meter = Math.min(100, Math.round((live?.level ?? 0) * 900));
 
   return (
     <main className={`teaching-lobby ${isTutorialOpen ? "is-tutorial-open" : "is-tutorial-collapsed"}`}>
@@ -359,7 +364,7 @@ export function Classroom({
               <strong>{micCaption(live.recorderState, live.isBusy, live.queueDepth)}</strong>
               {isArmed && (
                 <div className="mic-meter" aria-hidden="true">
-                  <div className="mic-meter-fill" style={{ width: `${meter}%` }} />
+                  <div className="mic-meter-fill" ref={live.meterRef} />
                 </div>
               )}
               {live.lastHeard && <span className="classroom-heard">“{live.lastHeard}”</span>}

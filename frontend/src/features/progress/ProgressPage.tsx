@@ -33,7 +33,6 @@ export function ProgressPage() {
   const next = rows.find(({ progress }) => progress?.status === "in_progress")
     ?? rows.find(({ progress }) => progress?.status !== "complete")
     ?? rows[0];
-  const gapTarget = [...rows].reverse().find(({ progress }) => progress?.status === "complete");
 
   function handleTool(tool: StudyToolId) {
     if (tool === "tutorial") {
@@ -85,7 +84,6 @@ export function ProgressPage() {
                 </div>
               )}
               <div className="dashboard-actions">
-                <button type="button" className="outline-action" disabled={!gapTarget} onClick={() => gapTarget && navigate(`${ROUTES.gaps}?path=${encodeURIComponent(gapTarget.path.path_id)}&class=${encodeURIComponent(gapTarget.unit.class_id)}`)}>VIEW GAPS</button>
                 <button type="button" className="solid-action" onClick={() => next ? navigate(`${ROUTES.study}?path=${encodeURIComponent(next.path.path_id)}&class=${encodeURIComponent(next.unit.class_id)}`) : navigate(ROUTES.material)}>{rows.length ? "CONTINUE LEARNING" : "START LEARNING"}</button>
               </div>
             </section>
