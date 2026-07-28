@@ -1,4 +1,6 @@
-# wut
+<p align="center">
+  <img src="docs/logo.png" alt="wut" width="380">
+</p>
 
 **You learn by teaching. We measure whether it worked.**
 
@@ -137,57 +139,6 @@ frontend/src/features/
   learning-data/  every backend call, in one file
   study/          the classroom, the mic, the seats
 ```
-
-Deeper docs in the repo: [`backend/LEARN_BY_TEACHING.md`](backend/LEARN_BY_TEACHING.md) (the
-teaching flow with real captured output), [`backend/API.md`](backend/API.md) (endpoint reference),
-[`ml-service/README.md`](ml-service/README.md) (models and deploy).
-
-## Contributing
-
-**Setup** — follow *Run it* above, then `pip install -r backend/requirements-dev.txt`.
-
-**Before you push:**
-
-```bash
-cd backend && source .venv/bin/activate && pytest -q     # 104 tests: no LLM, no GPU, no DB
-cd frontend && npm run build                             # tsc -b + vite build
-```
-
-**Where things go:**
-
-- Backend routes stay thin. Orchestration lives in `app/curriculum/` (plans, teaching, mastery),
-  `app/agents/` (the student and question writers) and `app/pipeline/` (measurement).
-- Every frontend backend call is declared in
-  `frontend/src/features/learning-data/backendLearningDataSource.ts` — add endpoints there, not
-  inline in components. `backend.types.ts` mirrors `backend/app/schemas.py`; change both together.
-- The backend and ml-service deploy separately and share no package, so
-  `backend/tests/test_ml_service_contract.py` asserts their schemas agree. It runs on CPU with no
-  torch — keep it that way.
-
-**Conventions:**
-
-- Tests are hermetic. Stub the LLM (see `_stub_llm` in `tests/test_workflow.py`) rather than calling
-  one; a test that needs network or a GPU doesn't belong in the suite.
-- Never put a key in a `VITE_*` variable — Vite inlines those into the browser bundle. Secrets live
-  in `backend/.env`, which is gitignored along with anything matching `.env.*`.
-- Tuning knobs go in `backend/app/config.py` with a default and a comment explaining the trade-off,
-  so they can be moved to `.env` without a code change.
-
-## Status
-
-Running end to end against a live ml-service on Hyper AI and DeepSeek models. 104 hermetic backend
-tests.
-
-Rough edges we know about:
-
-- The deployed GPU box predates the current `ml-service/` code, so word-level timings come back
-  degenerate (`/health` reports `pace_degraded`). Hesitation is currently caught by the
-  browser-measured prosody signal and a lexical backstop rather than by the acoustic model.
-  `ABSOLUTE_DISSONANCE` in `ml-service/config.py` is uncalibrated and wants tuning against two real
-  recordings — one confident, one hesitant.
-- `backend/API.md` predates the async analysis endpoints. `LEARN_BY_TEACHING.md` is current.
-- The pre-backend static mock UI is still wired up behind `/study?concept=...`.
-- No auth, no migrations. Schema changes mean dropping the volume.
 
 ## License
 
