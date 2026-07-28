@@ -162,5 +162,10 @@
 .markdown-notes pre, .notes-code { overflow-x: auto; padding: 16px; border: 2px solid var(--ink); background: #f3f3f3; }
 .markdown-notes table { width: 100%; border-collapse: collapse; }
 .markdown-notes th, .markdown-notes td { padding: 8px; border: 2px solid var(--ink); }
+.markdown-notes .katex { font-size: 1.05em; }
+.markdown-notes .katex-display { margin: 18px 0; padding: 4px 0; overflow-x: auto; overflow-y: hidden; }
+.markdown-notes .katex-display > .katex { text-align: center; }
 .notes-mermaid { overflow-x: auto; padding: 18px; border: 2px solid var(--ink); background: var(--paper); }
-.notes-mermaid svg { max-width: 100%; height: auto; }
+.notes-mermaid svg { display: block; width: 100%; height: auto; min-width: 420px; }
+.notes-mermaid foreignObject { overflow: visible; }
+.notes-mermaid .nodeLabel, .notes-mermaid .edgeLabel { white-space: normal; }

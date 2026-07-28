@@ -1,0 +1,45 @@
+Copyright (c) 2026 Alibi. All rights reserved.
+
+wut ("the Software") — including its source code, assets, designs, prompts,
+models, and documentation — is proprietary and confidential. It is published
+publicly for evaluation and demonstration only. Publication does not place the
+Software in the public domain and grants no licence beyond the one below.
+
+PERMITTED
+
+You may:
+
+  1. View and read the source code.
+  2. Clone the repository and run the Software locally, unmodified, for the sole
+     purpose of personally evaluating it.
+
+NOT PERMITTED
+
+You may not, without the prior written permission of the copyright holder:
+
+  1. Use the Software, in whole or in part, for any commercial purpose.
+  2. Use the Software in production, or to provide a service to any third party.
+  3. Copy, publish, distribute, sublicense, sell, or otherwise transfer the
+     Software or any part of it.
+  4. Modify the Software, or create derivative works based on it.
+  5. Reverse engineer the Software beyond what is necessary for the evaluation
+     permitted above.
+  6. Remove or alter this notice, or any copyright or attribution notice.
+
+Contributions submitted to this repository are licensed to the copyright holder
+on a perpetual, worldwide, royalty-free basis, and the copyright holder may
+relicense them, including commercially, without further permission or payment.
+
+Third-party dependencies retain their own licences, which are unaffected by
+this notice.
+
+To request a licence, contact the copyright holder.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

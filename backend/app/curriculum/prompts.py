@@ -77,8 +77,12 @@ enough to explain the topic confidently — a short intro, the key ideas, and th
 Requirements:
 - Keep it tight: roughly 200-400 words.
 - Use Markdown: a short intro paragraph, a few "## " sections, bullet lists, **bold** key terms.
+- Write EVERY formula, symbol, variable and unit as LaTeX between dollar signs: $F = ma$ inline,
+  and $$ ... $$ on its own lines for a display equation. Never write maths as plain text, and
+  never put a formula in a code block.
 - You MAY include AT MOST ONE diagram, as a fenced ```mermaid code block, only when a structure,
-  flow, or relationship genuinely makes the idea clearer. Make the mermaid syntax valid.
+  flow, or relationship genuinely makes the idea clearer. Make the mermaid syntax valid. Keep node
+  labels under six words and free of LaTeX — the detail belongs in the prose, not in the diagram.
 - NEVER include images, image links, HTML <img>, or base64 — text and mermaid only.
 - Output ONLY the Markdown body — no preamble, no surrounding code fences.
 

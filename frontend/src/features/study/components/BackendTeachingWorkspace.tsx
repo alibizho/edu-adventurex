@@ -173,7 +173,9 @@ export function BackendTeachingWorkspace({
 
       {(error || recorder.error) && <p className="conversation-completion-error" role="alert">{error ?? recorder.error}</p>}
 
-      <button type="button" className="back-to-material" disabled={busy} onClick={onBackToClass}>← BACK TO CLASS</button>
+      {!isOver && (
+        <button type="button" className="back-to-material" disabled={busy} onClick={onBackToClass}>← BACK TO CLASS</button>
+      )}
 
       <div className="conversation-footer" aria-hidden="true"><i /><i /><i /></div>
 
