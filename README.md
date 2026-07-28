@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="wut" width="380">
+  <img src="docs/logo.png" alt="wut" width="200">
 </p>
 
 **You learn by teaching. We measure whether it worked.**
