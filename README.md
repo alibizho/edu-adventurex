@@ -2,6 +2,10 @@
   <img src="docs/logo.png" alt="wut" width="200">
 </p>
 
+<p align="center">
+  <a href="https://gallery.adventure-x.org/projects/cms00zq0k000i02li6bok8v10">See it on the AdventureX gallery</a>
+</p>
+
 **You learn by teaching. We measure whether it worked.**
 
 Give it a topic. It builds a short course, hands you a one-page primer, and sits you in front of a
